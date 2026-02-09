@@ -9,10 +9,95 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class ConfigError(RuntimeError):
     """Raised when config is missing or invalid."""
+
+
+class ServiceCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    exec: list[str] = Field(min_length=1)
+    health: list[str] = Field(min_length=1)
+
+
+class CommandsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    codex: ServiceCommand
+    gemini: ServiceCommand
+    ollama: ServiceCommand
+
+
+class RoutingChains(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ask_chatgpt_cli: list[str] = Field(min_length=1)
+    ask_gemini_cli: list[str] = Field(min_length=1)
+    ask_ollama_cloud_fallback: list[str] = Field(min_length=1)
+
+
+class RoutingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    default_chains: RoutingChains
+
+
+class ModelsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ollama_default_model: str = Field(min_length=1)
+    ollama_final_backup_model: str = Field(min_length=1)
+    ollama_catalog: list[str] = Field(min_length=1)
+    ollama_aliases: dict[str, str] = Field(min_length=1)
+    ollama_local_fallback_chain: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_ollama_model_links(self) -> "ModelsConfig":
+        catalog = set(self.ollama_catalog)
+        if self.ollama_default_model not in catalog:
+            raise ValueError("models.ollama_default_model must exist in models.ollama_catalog")
+        if self.ollama_final_backup_model not in catalog:
+            raise ValueError("models.ollama_final_backup_model must exist in models.ollama_catalog")
+        for alias, model_name in self.ollama_aliases.items():
+            if not alias.strip():
+                raise ValueError("models.ollama_aliases keys must be non-empty")
+            if model_name not in catalog:
+                raise ValueError(
+                    f"models.ollama_aliases.{alias} must reference a model in models.ollama_catalog"
+                )
+        alias_keys = set(self.ollama_aliases.keys())
+        for token in self.ollama_local_fallback_chain:
+            if token not in alias_keys and token not in catalog:
+                raise ValueError(
+                    "models.ollama_local_fallback_chain entries must be alias keys or catalog model names"
+                )
+        return self
+
+
+class SecurityConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    block_patterns: list[str] = Field(min_length=1)
+    sensitive_paths: list[str] = Field(min_length=1)
+
+
+class RuntimeApplySystemSuffix(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    codex: bool
+    gemini: bool
+    ollama: bool
+
+
+class RuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    system_suffix: str
+    apply_system_suffix: RuntimeApplySystemSuffix
+
+
+class AppConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    commands: CommandsConfig
+    routing: RoutingConfig
+    models: ModelsConfig
+    security: SecurityConfig
+    runtime: RuntimeConfig
 
 
 def _load_yaml_from_path(path: Path) -> dict[str, Any]:
@@ -45,80 +130,11 @@ def _parse_yaml(content: str, source: str) -> dict[str, Any]:
     return parsed
 
 
-def _require_str_list(raw: Any, key_path: str) -> list[str]:
-    if not isinstance(raw, list) or not raw or not all(isinstance(item, str) for item in raw):
-        raise ConfigError(f"CONFIG_SCHEMA_ERROR: {key_path} must be a non-empty list[str]")
-    return raw
-
-
-def _validate_commands(raw: Any) -> dict[str, dict[str, list[str]]]:
-    required_services = ("codex", "gemini", "ollama")
-    if not isinstance(raw, dict):
-        raise ConfigError("CONFIG_SCHEMA_ERROR: commands must be a mapping")
-    normalized: dict[str, dict[str, list[str]]] = {}
-    for service in required_services:
-        service_cfg = raw.get(service)
-        if not isinstance(service_cfg, dict):
-            raise ConfigError(f"CONFIG_SCHEMA_ERROR: commands.{service} must be a mapping")
-        exec_cmd = _require_str_list(service_cfg.get("exec"), f"commands.{service}.exec")
-        health_cmd = _require_str_list(service_cfg.get("health"), f"commands.{service}.health")
-        normalized[service] = {"exec": exec_cmd, "health": health_cmd}
-    return normalized
-
-
-def _validate_routing(raw: Any) -> dict[str, dict[str, list[str]]]:
-    required_chain_keys = ("ask_chatgpt_cli", "ask_gemini_cli", "ask_ollama_cloud_fallback")
-    if not isinstance(raw, dict):
-        raise ConfigError("CONFIG_SCHEMA_ERROR: routing must be a mapping")
-    chains = raw.get("default_chains")
-    if not isinstance(chains, dict):
-        raise ConfigError("CONFIG_SCHEMA_ERROR: routing.default_chains must be a mapping")
-    normalized_chains: dict[str, list[str]] = {}
-    for chain_key in required_chain_keys:
-        normalized_chains[chain_key] = _require_str_list(
-            chains.get(chain_key), f"routing.default_chains.{chain_key}"
-        )
-    return {"default_chains": normalized_chains}
-
-
-def _validate_models(raw: Any) -> dict[str, str]:
-    required_keys = ("ollama_default_model", "ollama_final_backup_model")
-    if not isinstance(raw, dict):
-        raise ConfigError("CONFIG_SCHEMA_ERROR: models must be a mapping")
-    normalized: dict[str, str] = {}
-    for key in required_keys:
-        value = raw.get(key)
-        if not isinstance(value, str) or not value.strip():
-            raise ConfigError(f"CONFIG_SCHEMA_ERROR: models.{key} must be a non-empty string")
-        normalized[key] = value
-    return normalized
-
-
-def _validate_security(raw: Any) -> dict[str, list[str]]:
-    if not isinstance(raw, dict):
-        raise ConfigError("CONFIG_SCHEMA_ERROR: security must be a mapping")
-    block_patterns = _require_str_list(raw.get("block_patterns"), "security.block_patterns")
-    sensitive_paths = _require_str_list(raw.get("sensitive_paths"), "security.sensitive_paths")
-    return {"block_patterns": block_patterns, "sensitive_paths": sensitive_paths}
-
-
-def _validate_runtime(raw: Any) -> dict[str, str]:
-    if not isinstance(raw, dict):
-        raise ConfigError("CONFIG_SCHEMA_ERROR: runtime must be a mapping")
-    system_suffix = raw.get("system_suffix")
-    if not isinstance(system_suffix, str):
-        raise ConfigError("CONFIG_SCHEMA_ERROR: runtime.system_suffix must be a string")
-    return {"system_suffix": system_suffix}
-
-
 def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "commands": _validate_commands(raw.get("commands")),
-        "routing": _validate_routing(raw.get("routing")),
-        "models": _validate_models(raw.get("models")),
-        "security": _validate_security(raw.get("security")),
-        "runtime": _validate_runtime(raw.get("runtime")),
-    }
+    try:
+        return AppConfig.model_validate(raw).model_dump(mode="python")
+    except ValidationError as exc:
+        raise ConfigError(f"CONFIG_SCHEMA_ERROR: {exc}") from exc
 
 
 def load_config(config_path: str | None = None) -> dict[str, Any]:
@@ -153,4 +169,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

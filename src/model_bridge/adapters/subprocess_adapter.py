@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
@@ -18,20 +19,33 @@ class SubprocessAdapter(CLIAdapter):
         cli_config: Mapping[str, Mapping[str, Sequence[str]]],
         env: Mapping[str, str] | None = None,
         system_suffix: str = "",
+        apply_system_suffix_for: Mapping[str, bool] | None = None,
     ) -> None:
         self.cli_config = cli_config
         self.env = dict(env) if env is not None else os.environ.copy()
         self.system_suffix = system_suffix
+        self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
 
-    def run(self, service_name: str, args: Sequence[str], input_text: str) -> Tuple[bool, str]:
+    def _prepare_command(
+        self, service_name: str, args: Sequence[str], input_text: str
+    ) -> Tuple[bool, str, list[str]]:
         config = self.cli_config.get(service_name, {})
         cmd_base = list(config.get("exec", []))
         if not cmd_base:
-            return False, f"Configuration Error: No command defined for {service_name}"
+            return False, f"Configuration Error: No command defined for {service_name}", []
         if not shutil.which(cmd_base[0]):
-            return False, f"System Error: Command '{cmd_base[0]}' not found."
+            return False, f"System Error: Command '{cmd_base[0]}' not found.", []
+        if self.apply_system_suffix_for.get(service_name, True):
+            full_input = input_text + self.system_suffix
+        else:
+            full_input = input_text
+        full_cmd = cmd_base + list(args) + [full_input]
+        return True, "", full_cmd
 
-        full_cmd = cmd_base + list(args) + [input_text + self.system_suffix]
+    def run(self, service_name: str, args: Sequence[str], input_text: str) -> Tuple[bool, str]:
+        ok, err, full_cmd = self._prepare_command(service_name, args, input_text)
+        if not ok:
+            return False, err
         try:
             result = subprocess.run(
                 full_cmd,
@@ -47,3 +61,25 @@ class SubprocessAdapter(CLIAdapter):
             return True, result.stdout.strip()
         return False, (result.stdout + result.stderr).strip()
 
+    async def run_async(
+        self, service_name: str, args: Sequence[str], input_text: str
+    ) -> Tuple[bool, str]:
+        ok, err, full_cmd = self._prepare_command(service_name, args, input_text)
+        if not ok:
+            return False, err
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *full_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self.env,
+            )
+            stdout_bytes, stderr_bytes = await proc.communicate()
+        except Exception as exc:
+            return False, str(exc)
+
+        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        if proc.returncode == 0:
+            return True, stdout.strip()
+        return False, (stdout + stderr).strip()

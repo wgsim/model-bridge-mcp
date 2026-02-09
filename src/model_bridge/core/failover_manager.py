@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, List, Sequence
 
 
@@ -19,7 +20,35 @@ class FailoverManager:
     def _format_error(self, routing: Sequence[str], msg: str) -> str:
         return f"[Task Execution Failed]\n{msg}\n\n--- [Routing Log] ---\n" + "\n".join(routing)
 
+    async def _run_adapter(
+        self, service_name: str, args: Sequence[str], input_text: str
+    ) -> tuple[bool, str]:
+        run_async = getattr(self.adapter, "run_async", None)
+        if callable(run_async):
+            return await run_async(service_name, args, input_text)
+        return self.adapter.run(service_name, args, input_text)
+
     def execute(
+        self,
+        primary: str,
+        secondary: str,
+        prompt: str,
+        mode: str,
+        force_primary: bool = False,
+        allow_tertiary: bool = True,
+    ) -> str:
+        return asyncio.run(
+            self.execute_async(
+                primary=primary,
+                secondary=secondary,
+                prompt=prompt,
+                mode=mode,
+                force_primary=force_primary,
+                allow_tertiary=allow_tertiary,
+            )
+        )
+
+    async def execute_async(
         self,
         primary: str,
         secondary: str,
@@ -35,7 +64,7 @@ class FailoverManager:
         routing_log: List[str] = []
 
         routing_log.append(f"[1] Primary ({primary}): Trying...")
-        success, output = self.adapter.run(primary, [], prompt)
+        success, output = await self._run_adapter(primary, [], prompt)
         if success:
             routing_log.append("    [SUCCESS]")
             return self._format_response(output, routing_log)
@@ -48,7 +77,7 @@ class FailoverManager:
 
         failover_prompt = f"[Context: {primary} failed] {prompt}"
         routing_log.append(f"[2] Secondary ({secondary}): Trying...")
-        success, output = self.adapter.run(secondary, [], failover_prompt)
+        success, output = await self._run_adapter(secondary, [], failover_prompt)
         if success:
             routing_log.append("    [SUCCESS]")
             return self._format_response(output, routing_log)
@@ -58,7 +87,7 @@ class FailoverManager:
         if allow_tertiary and primary != "ollama":
             backup_model = self.config["models"]["ollama_final_backup_model"]
             routing_log.append("[3] Ollama: Trying...")
-            success, output = self.adapter.run("ollama", [backup_model], failover_prompt)
+            success, output = await self._run_adapter("ollama", [backup_model], failover_prompt)
             if success:
                 routing_log.append("    [SUCCESS]")
                 return self._format_response(output, routing_log)
