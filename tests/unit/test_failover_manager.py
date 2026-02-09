@@ -128,3 +128,18 @@ def test_execute_returns_all_failed_error():
     assert "[Task Execution Failed]" in out
     assert "All services failed. Last Error: tertiary-fail" in out
 
+
+def test_execute_skips_tertiary_when_disabled():
+    adapter = _FakeAdapter(
+        {
+            ("codex", ()): (False, "primary-fail"),
+            ("gemini", ()): (False, "secondary-fail"),
+        }
+    )
+    manager = FailoverManager(adapter=adapter, sanitizer=_AllowAllSanitizer(), config=_base_config())
+
+    out = manager.execute("codex", "gemini", "hello", mode="execution", allow_tertiary=False)
+
+    assert "[Task Execution Failed]" in out
+    assert "All services failed. Last Error: secondary-fail" in out
+    assert len(adapter.calls) == 2

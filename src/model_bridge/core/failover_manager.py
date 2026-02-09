@@ -26,6 +26,7 @@ class FailoverManager:
         prompt: str,
         mode: str,
         force_primary: bool = False,
+        allow_tertiary: bool = True,
     ) -> str:
         ok, sec_msg = self.sanitizer.inspect(prompt, mode=mode)
         if not ok:
@@ -54,7 +55,7 @@ class FailoverManager:
 
         routing_log.append("    [FAILED]")
 
-        if primary != "ollama":
+        if allow_tertiary and primary != "ollama":
             backup_model = self.config["models"]["ollama_final_backup_model"]
             routing_log.append("[3] Ollama: Trying...")
             success, output = self.adapter.run("ollama", [backup_model], failover_prompt)
@@ -64,4 +65,3 @@ class FailoverManager:
             routing_log.append("    [FAILED]")
 
         return self._format_error(routing_log, f"All services failed. Last Error: {output}")
-
