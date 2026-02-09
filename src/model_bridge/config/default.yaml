@@ -18,6 +18,13 @@ routing:
 models:
   ollama_default_model: "llama3.2"
   ollama_final_backup_model: "qwen3-coder:30b-a3b-q8_0"
+  ollama_catalog:
+    - "llama3.2"
+    - "qwen3-coder:30b-a3b-q8_0"
+  ollama_aliases:
+    default: "llama3.2"
+    fast: "llama3.2"
+    coder: "qwen3-coder:30b-a3b-q8_0"
 
 security:
   block_patterns:
@@ -35,4 +42,7 @@ security:
 
 runtime:
   system_suffix: "\n\n[SYSTEM INSTRUCTION: Return raw code/text only. Do NOT use emojis. Do NOT use markdown code blocks.]"
-
+  apply_system_suffix:
+    codex: true
+    gemini: true
+    ollama: false

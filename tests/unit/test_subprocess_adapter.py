@@ -116,3 +116,26 @@ def test_run_async_returns_combined_output_on_nonzero_exit():
 
     assert ok is False
     assert output == "partial async\nasync fail"
+
+
+def test_run_skips_suffix_when_service_flag_is_false():
+    adapter = SubprocessAdapter(
+        _build_config(),
+        system_suffix=" [suffix]",
+        apply_system_suffix_for={"ollama": False},
+    )
+    completed = subprocess.CompletedProcess(
+        args=["ollama", "run"],
+        returncode=0,
+        stdout="ok\n",
+        stderr="",
+    )
+
+    with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
+        "subprocess.run", return_value=completed
+    ) as run_mock:
+        ok, _ = adapter.run("ollama", ["llama3.2"], "hello")
+
+    assert ok is True
+    called_cmd = run_mock.call_args.args[0]
+    assert called_cmd == ["ollama", "run", "llama3.2", "hello"]

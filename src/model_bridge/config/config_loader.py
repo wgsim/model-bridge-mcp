@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class ConfigError(RuntimeError):
@@ -45,6 +45,24 @@ class ModelsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ollama_default_model: str = Field(min_length=1)
     ollama_final_backup_model: str = Field(min_length=1)
+    ollama_catalog: list[str] = Field(min_length=1)
+    ollama_aliases: dict[str, str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_ollama_model_links(self) -> "ModelsConfig":
+        catalog = set(self.ollama_catalog)
+        if self.ollama_default_model not in catalog:
+            raise ValueError("models.ollama_default_model must exist in models.ollama_catalog")
+        if self.ollama_final_backup_model not in catalog:
+            raise ValueError("models.ollama_final_backup_model must exist in models.ollama_catalog")
+        for alias, model_name in self.ollama_aliases.items():
+            if not alias.strip():
+                raise ValueError("models.ollama_aliases keys must be non-empty")
+            if model_name not in catalog:
+                raise ValueError(
+                    f"models.ollama_aliases.{alias} must reference a model in models.ollama_catalog"
+                )
+        return self
 
 
 class SecurityConfig(BaseModel):
@@ -53,9 +71,17 @@ class SecurityConfig(BaseModel):
     sensitive_paths: list[str] = Field(min_length=1)
 
 
+class RuntimeApplySystemSuffix(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    codex: bool
+    gemini: bool
+    ollama: bool
+
+
 class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     system_suffix: str
+    apply_system_suffix: RuntimeApplySystemSuffix
 
 
 class AppConfig(BaseModel):
@@ -136,4 +162,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

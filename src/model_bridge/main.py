@@ -28,6 +28,7 @@ ADAPTER = SubprocessAdapter(
     cli_config=CONFIG["commands"],
     env=os.environ.copy(),
     system_suffix=CONFIG["runtime"]["system_suffix"],
+    apply_system_suffix_for=CONFIG["runtime"]["apply_system_suffix"],
 )
 FAILOVER = FailoverManager(adapter=ADAPTER, sanitizer=SecuritySanitizer, config=CONFIG)
 
@@ -118,6 +119,31 @@ def _save_if_requested(
     return f"{save_result}\n[DEBUG META] Saved to: {meta_path}\n\n{response}"
 
 
+def _resolve_ollama_model(model_arg: str) -> tuple[str | None, str]:
+    models_cfg = CONFIG["models"]
+    aliases = models_cfg.get("ollama_aliases", {})
+    catalog = set(models_cfg.get("ollama_catalog", []))
+    token = (model_arg or "").strip()
+    if not token:
+        token = models_cfg["ollama_default_model"]
+
+    if token in aliases:
+        resolved = aliases[token]
+        return resolved, ""
+    if token in catalog:
+        return token, ""
+
+    alias_keys = ", ".join(sorted(aliases.keys()))
+    model_names = ", ".join(sorted(catalog))
+    return (
+        None,
+        (
+            f"[MODEL ERROR] Unknown ollama model/alias: '{token}'. "
+            f"Aliases: [{alias_keys}] | Models: [{model_names}]"
+        ),
+    )
+
+
 @mcp.tool()
 async def ask_chatgpt_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
     response = await FAILOVER.execute_async(
@@ -140,7 +166,11 @@ async def ask_ollama(prompt: str, save_path: str = None, model: str = "llama3.2"
     if not is_safe:
         return sec_msg
 
-    success, output = await ADAPTER.run_async("ollama", [model], prompt)
+    resolved_model, model_error = _resolve_ollama_model(model)
+    if resolved_model is None:
+        return model_error
+
+    success, output = await ADAPTER.run_async("ollama", [resolved_model], prompt)
     if success:
         response = f"[Source: Ollama]\n{output}"
         return _save_if_requested(response, save_path, tool_name="ask_ollama")

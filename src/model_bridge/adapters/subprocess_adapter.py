@@ -19,10 +19,12 @@ class SubprocessAdapter(CLIAdapter):
         cli_config: Mapping[str, Mapping[str, Sequence[str]]],
         env: Mapping[str, str] | None = None,
         system_suffix: str = "",
+        apply_system_suffix_for: Mapping[str, bool] | None = None,
     ) -> None:
         self.cli_config = cli_config
         self.env = dict(env) if env is not None else os.environ.copy()
         self.system_suffix = system_suffix
+        self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
 
     def _prepare_command(
         self, service_name: str, args: Sequence[str], input_text: str
@@ -33,7 +35,11 @@ class SubprocessAdapter(CLIAdapter):
             return False, f"Configuration Error: No command defined for {service_name}", []
         if not shutil.which(cmd_base[0]):
             return False, f"System Error: Command '{cmd_base[0]}' not found.", []
-        full_cmd = cmd_base + list(args) + [input_text + self.system_suffix]
+        if self.apply_system_suffix_for.get(service_name, True):
+            full_input = input_text + self.system_suffix
+        else:
+            full_input = input_text
+        full_cmd = cmd_base + list(args) + [full_input]
         return True, "", full_cmd
 
     def run(self, service_name: str, args: Sequence[str], input_text: str) -> Tuple[bool, str]:
