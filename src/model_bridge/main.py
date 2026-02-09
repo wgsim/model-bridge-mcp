@@ -119,31 +119,35 @@ def _save_if_requested(
 
 
 @mcp.tool()
-def ask_chatgpt_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
-    response = FAILOVER.execute("codex", "gemini", prompt, "execution", force_primary=force_model)
+async def ask_chatgpt_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
+    response = await FAILOVER.execute_async(
+        "codex", "gemini", prompt, "execution", force_primary=force_model
+    )
     return _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
 
 
 @mcp.tool()
-def ask_gemini_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
-    response = FAILOVER.execute("gemini", "codex", prompt, "analysis", force_primary=force_model)
+async def ask_gemini_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
+    response = await FAILOVER.execute_async(
+        "gemini", "codex", prompt, "analysis", force_primary=force_model
+    )
     return _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
 
 
 @mcp.tool()
-def ask_ollama(prompt: str, save_path: str = None, model: str = "llama3.2") -> str:
+async def ask_ollama(prompt: str, save_path: str = None, model: str = "llama3.2") -> str:
     is_safe, sec_msg = SecuritySanitizer.inspect(prompt, mode="execution")
     if not is_safe:
         return sec_msg
 
-    success, output = ADAPTER.run("ollama", [model], prompt)
+    success, output = await ADAPTER.run_async("ollama", [model], prompt)
     if success:
         response = f"[Source: Ollama]\n{output}"
         return _save_if_requested(response, save_path, tool_name="ask_ollama")
 
     logger.warning("Ollama unreachable. Failing over to cloud chain.")
     cloud_prompt = f"[WARNING: Local Ollama failed. Executing via Cloud Backup] {prompt}"
-    response = FAILOVER.execute(
+    response = await FAILOVER.execute_async(
         "codex",
         "gemini",
         cloud_prompt,

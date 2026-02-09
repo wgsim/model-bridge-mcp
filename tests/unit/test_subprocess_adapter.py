@@ -1,4 +1,5 @@
 import subprocess
+import asyncio
 from unittest.mock import patch
 
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
@@ -73,3 +74,45 @@ def test_run_returns_config_error_for_unknown_service():
     ok, output = adapter.run("gemini", [], "hello")
     assert ok is False
     assert output == "Configuration Error: No command defined for gemini"
+
+
+def test_run_async_returns_success_stdout():
+    adapter = SubprocessAdapter(_build_config(), env={"X": "1"}, system_suffix=" [suffix]")
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"async-ok\n", b""
+
+    async def _fake_exec(*args, **kwargs):
+        return _Proc()
+
+    with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
+        "asyncio.create_subprocess_exec", side_effect=_fake_exec
+    ):
+        ok, output = asyncio.run(adapter.run_async("ollama", ["llama3.2"], "hello"))
+
+    assert ok is True
+    assert output == "async-ok"
+
+
+def test_run_async_returns_combined_output_on_nonzero_exit():
+    adapter = SubprocessAdapter(_build_config())
+
+    class _Proc:
+        returncode = 1
+
+        async def communicate(self):
+            return b"partial async\n", b"async fail\n"
+
+    async def _fake_exec(*args, **kwargs):
+        return _Proc()
+
+    with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
+        "asyncio.create_subprocess_exec", side_effect=_fake_exec
+    ):
+        ok, output = asyncio.run(adapter.run_async("ollama", ["llama3.2"], "hello"))
+
+    assert ok is False
+    assert output == "partial async\nasync fail"

@@ -1,3 +1,5 @@
+import asyncio
+
 from model_bridge.core.failover_manager import FailoverManager
 
 
@@ -143,3 +145,24 @@ def test_execute_skips_tertiary_when_disabled():
     assert "[Task Execution Failed]" in out
     assert "All services failed. Last Error: secondary-fail" in out
     assert len(adapter.calls) == 2
+
+
+def test_execute_async_uses_async_adapter_path():
+    class _AsyncOnlyAdapter:
+        def __init__(self):
+            self.calls = []
+
+        async def run_async(self, service_name, args, input_text):
+            self.calls.append((service_name, list(args), input_text))
+            return True, "async-primary-ok"
+
+        def run(self, service_name, args, input_text):  # pragma: no cover
+            raise AssertionError("sync run should not be used")
+
+    adapter = _AsyncOnlyAdapter()
+    manager = FailoverManager(adapter=adapter, sanitizer=_AllowAllSanitizer(), config=_base_config())
+
+    out = asyncio.run(manager.execute_async("codex", "gemini", "hello", mode="execution"))
+
+    assert "async-primary-ok" in out
+    assert len(adapter.calls) == 1
