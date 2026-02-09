@@ -1,0 +1,77 @@
+from pathlib import Path
+
+import pytest
+
+from model_bridge.config.config_loader import ConfigError, load_config
+
+
+def _write_yaml(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_load_config_from_default_succeeds():
+    config = load_config()
+    assert "commands" in config
+    assert "routing" in config
+    assert "models" in config
+    assert "security" in config
+    assert "runtime" in config
+
+
+def test_load_config_missing_file_raises_config_not_found():
+    with pytest.raises(ConfigError, match="CONFIG_NOT_FOUND"):
+        load_config("/tmp/not-found-for-test.yaml")
+
+
+def test_load_config_invalid_schema_type_raises_schema_error(tmp_path: Path):
+    config_path = _write_yaml(
+        tmp_path / "invalid.yaml",
+        """
+commands: []
+routing:
+  default_chains:
+    ask_chatgpt_cli: [codex, gemini, ollama]
+    ask_gemini_cli: [gemini, codex, ollama]
+    ask_ollama_cloud_fallback: [codex, gemini]
+models:
+  ollama_default_model: llama3.2
+  ollama_final_backup_model: qwen3-coder:30b-a3b-q8_0
+security:
+  block_patterns: [a]
+  sensitive_paths: [/etc/]
+runtime:
+  system_suffix: "x"
+""",
+    )
+    with pytest.raises(ConfigError, match="CONFIG_SCHEMA_ERROR"):
+        load_config(str(config_path))
+
+
+def test_load_config_unknown_top_level_key_raises_schema_error(tmp_path: Path):
+    config_path = _write_yaml(
+        tmp_path / "unknown-key.yaml",
+        """
+commands:
+  codex: {exec: [codex, exec], health: [codex, --version]}
+  gemini: {exec: [gemini], health: [gemini, --version]}
+  ollama: {exec: [ollama, run], health: [ollama, --version]}
+routing:
+  default_chains:
+    ask_chatgpt_cli: [codex, gemini, ollama]
+    ask_gemini_cli: [gemini, codex, ollama]
+    ask_ollama_cloud_fallback: [codex, gemini]
+models:
+  ollama_default_model: llama3.2
+  ollama_final_backup_model: qwen3-coder:30b-a3b-q8_0
+security:
+  block_patterns: [a]
+  sensitive_paths: [/etc/]
+runtime:
+  system_suffix: "x"
+unexpected_key: true
+""",
+    )
+    with pytest.raises(ConfigError, match="CONFIG_SCHEMA_ERROR"):
+        load_config(str(config_path))
+
