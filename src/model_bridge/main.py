@@ -6,6 +6,9 @@ import logging
 import os
 import re
 import time
+import json
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -144,6 +147,37 @@ def _resolve_ollama_model(model_arg: str) -> tuple[str | None, str]:
     )
 
 
+def _parse_ollama_list_output(output: str) -> list[str]:
+    names: list[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.upper().startswith("NAME "):
+            continue
+        name = line.split()[0]
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _get_installed_ollama_models() -> tuple[list[str], str]:
+    if not shutil.which("ollama"):
+        return [], "ollama command not found"
+    try:
+        proc = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception as exc:
+        return [], str(exc)
+    if proc.returncode != 0:
+        return [], (proc.stdout + proc.stderr).strip() or f"exit_code={proc.returncode}"
+    return _parse_ollama_list_output(proc.stdout), ""
+
+
 @mcp.tool()
 async def ask_chatgpt_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
     response = await FAILOVER.execute_async(
@@ -186,6 +220,30 @@ async def ask_ollama(prompt: str, save_path: str = None, model: str = "llama3.2"
         allow_tertiary=False,
     )
     return _save_if_requested(response, save_path, tool_name="ask_ollama")
+
+
+@mcp.tool()
+def list_ollama_models() -> str:
+    models_cfg = CONFIG["models"]
+    default_model = models_cfg["ollama_default_model"]
+    aliases = models_cfg["ollama_aliases"]
+    catalog = models_cfg["ollama_catalog"]
+
+    installed, error = _get_installed_ollama_models()
+    missing = [name for name in catalog if name not in installed]
+
+    status = "ok" if not error else "unavailable"
+    payload = {
+        "status": status,
+        "default_model": default_model,
+        "aliases": aliases,
+        "catalog": catalog,
+        "installed": installed,
+        "missing": missing,
+    }
+    if error:
+        payload["error"] = error
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def run() -> None:
