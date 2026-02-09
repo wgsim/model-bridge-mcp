@@ -34,3 +34,21 @@ def test_save_if_requested_skips_body_file_on_failure(tmp_path: Path):
     assert len(meta_files) == 1
     assert "[FILE SKIPPED] No model body extracted from response." in out
 
+
+def test_save_if_requested_masks_sensitive_text_in_meta(tmp_path: Path):
+    response = (
+        "body\n\n--- [Routing Log] ---\n"
+        "Authorization: Bearer SECRET_TOKEN\n"
+        "api_key=MY_REAL_KEY"
+    )
+    target = tmp_path / "result.txt"
+    debug_dir = tmp_path / ".tmp-debug"
+
+    _save_if_requested(response, str(target), tool_name="ask_chatgpt_cli", debug_dir=str(debug_dir))
+
+    meta_files = list(debug_dir.glob("*.meta.log"))
+    assert len(meta_files) == 1
+    meta_text = meta_files[0].read_text(encoding="utf-8")
+    assert "SECRET_TOKEN" not in meta_text
+    assert "MY_REAL_KEY" not in meta_text
+    assert "***MASKED***" in meta_text

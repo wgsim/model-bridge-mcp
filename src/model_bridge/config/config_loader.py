@@ -47,6 +47,7 @@ class ModelsConfig(BaseModel):
     ollama_final_backup_model: str = Field(min_length=1)
     ollama_catalog: list[str] = Field(min_length=1)
     ollama_aliases: dict[str, str] = Field(min_length=1)
+    ollama_local_fallback_chain: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_ollama_model_links(self) -> "ModelsConfig":
@@ -61,6 +62,12 @@ class ModelsConfig(BaseModel):
             if model_name not in catalog:
                 raise ValueError(
                     f"models.ollama_aliases.{alias} must reference a model in models.ollama_catalog"
+                )
+        alias_keys = set(self.ollama_aliases.keys())
+        for token in self.ollama_local_fallback_chain:
+            if token not in alias_keys and token not in catalog:
+                raise ValueError(
+                    "models.ollama_local_fallback_chain entries must be alias keys or catalog model names"
                 )
         return self
 

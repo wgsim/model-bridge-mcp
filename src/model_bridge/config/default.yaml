@@ -25,6 +25,9 @@ models:
     default: "llama3.2"
     fast: "llama3.2"
     coder: "qwen3-coder:30b-a3b-q8_0"
+  ollama_local_fallback_chain:
+    - "default"
+    - "coder"
 
 security:
   block_patterns:

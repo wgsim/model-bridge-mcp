@@ -24,6 +24,9 @@ def test_list_ollama_models_reports_installed_and_missing(monkeypatch):
     assert result["status"] == "ok"
     assert "llama3.2" in result["installed"]
     assert "qwen3-coder:30b-a3b-q8_0" in result["missing"]
+    assert result["effective_default"] == "llama3.2"
+    assert "default" in result["recommended_aliases"]
+    assert "ollama pull qwen3-coder:30b-a3b-q8_0" in result["pull_commands"]
     assert "default_model" in result
     assert "aliases" in result
     assert "catalog" in result
@@ -39,6 +42,17 @@ def test_list_ollama_models_reports_unavailable_with_error(monkeypatch):
     assert result["status"] == "unavailable"
     assert result["installed"] == []
     assert result["error"] == "ollama command not found"
+    assert result["effective_default"] == "llama3.2"
+
+
+def test_list_ollama_models_treats_latest_as_installed(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "_get_installed_ollama_models",
+        lambda: (["llama3.2:latest", "qwen3-coder:30b-a3b-q8_0"], ""),
+    )
+    result = json.loads(main_module.list_ollama_models())
+    assert result["missing"] == []
 
 
 def test_get_installed_ollama_models_handles_nonzero_exit(monkeypatch):
@@ -51,4 +65,3 @@ def test_get_installed_ollama_models_handles_nonzero_exit(monkeypatch):
     models, err = main_module._get_installed_ollama_models()
     assert models == []
     assert err == "boom"
-
