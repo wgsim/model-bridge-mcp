@@ -1,0 +1,38 @@
+commands:
+  codex:
+    exec: ["codex", "exec"]
+    health: ["codex", "--version"]
+  gemini:
+    exec: ["gemini"]
+    health: ["gemini", "--version"]
+  ollama:
+    exec: ["ollama", "run"]
+    health: ["ollama", "--version"]
+
+routing:
+  default_chains:
+    ask_chatgpt_cli: ["codex", "gemini", "ollama"]
+    ask_gemini_cli: ["gemini", "codex", "ollama"]
+    ask_ollama_cloud_fallback: ["codex", "gemini"]
+
+models:
+  ollama_default_model: "llama3.2"
+  ollama_final_backup_model: "qwen3-coder:30b-a3b-q8_0"
+
+security:
+  block_patterns:
+    - "rm\\s+(-r[a-zA-Z]*f|-f[a-zA-Z]*r)\\s+"
+    - "mkfs\\."
+    - ":\\(\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&"
+    - "dd\\s+if="
+    - "chmod\\s+777"
+  sensitive_paths:
+    - "/etc/"
+    - "/var/"
+    - "/boot/"
+    - "/proc/"
+    - "/root/"
+
+runtime:
+  system_suffix: "\n\n[SYSTEM INSTRUCTION: Return raw code/text only. Do NOT use emojis. Do NOT use markdown code blocks.]"
+
