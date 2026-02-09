@@ -15,7 +15,7 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
   - security sanitizer
 
 ## Tasks
-- [ ] **Task 1: Packaging Foundation First**
+- [x] **Task 1: Packaging Foundation First**
     - Create package skeleton: `src/model_bridge/{core,adapters,security,config}`.
     - Add `src/model_bridge/__init__.py`.
     - Add `pyproject.toml` and minimal runtime dependencies (`mcp`, `PyYAML`).
@@ -23,7 +23,7 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
       - `python -m pip install -e .` succeeds in venv.
       - `python -c "import model_bridge"` succeeds.
 
-- [ ] **Task 2: Configuration Externalization**
+- [x] **Task 2: Configuration Externalization**
     - Create `config/config_loader.py` and `config/default.yaml`.
     - Load packaged YAML via `importlib.resources` (not cwd-relative paths).
     - Move hardcoded CLI command paths, model names, and fallback order from `v1.1` into YAML config.
@@ -32,7 +32,7 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
       - `python -m model_bridge.config.config_loader` loads YAML and prints normalized config (or exits with clear error).
       - Missing/invalid config path produces deterministic error message.
 
-- [ ] **Task 3: Extract Security and Adapter Layers**
+- [x] **Task 3: Extract Security and Adapter Layers**
     - Move `SecuritySanitizer` logic to `security/sanitizer.py`.
     - Create adapter interface in `adapters/base.py`.
     - Implement subprocess adapter in `adapters/subprocess_adapter.py`.
@@ -41,7 +41,7 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
       - `pytest -q tests/unit/test_security_sanitizer.py` passes.
       - `pytest -q tests/unit/test_subprocess_adapter.py` passes with mocked `subprocess.run`.
 
-- [ ] **Task 4: Extract Failover Core**
+- [x] **Task 4: Extract Failover Core**
     - Move routing/failover orchestration into `core/failover_manager.py`.
     - Inject adapter/config/security dependencies (no hidden globals).
     - Preserve current priority chain semantics and force-primary behavior.
@@ -49,7 +49,7 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
       - `pytest -q tests/unit/test_failover_manager.py` passes.
       - Test explicitly proves secondary fallback is called when primary fails.
 
-- [ ] **Task 5: Assemble MCP Entrypoint**
+- [x] **Task 5: Assemble MCP Entrypoint**
     - Create `src/model_bridge/main.py`.
     - Register MCP tools with unchanged external signatures:
       - `ask_chatgpt_cli(prompt, save_path=None, force_model=False)`
@@ -62,7 +62,7 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
         - `mcp run src/model_bridge/main.py` or
         - `python -m model_bridge.main`
 
-- [ ] **Task 6: Documentation and Operational Checks**
+- [x] **Task 6: Documentation and Operational Checks**
     - Write `README.md` with setup, config, failover behavior, and security boundaries.
     - Document migration note from `coder_ai_allocator_v1.1.py` to `src/model_bridge/main.py`.
     - → Verify:
@@ -101,14 +101,17 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
     - After install, script-based startup works in clean venv.
 
 ## Done When
-- [ ] `src/model_bridge/` modular structure replaces monolithic flow without tool-level behavior regression.
-- [ ] Hardcoded runtime config values are moved to YAML with validated loading.
-- [ ] Unit tests for config/security/adapter/failover pass.
-- [ ] MCP smoke run is successful in the target environment.
-- [ ] `README.md` documents setup, config, and migration behavior.
+- [x] `src/model_bridge/` modular structure replaces monolithic flow without tool-level behavior regression.
+- [x] Hardcoded runtime config values are moved to YAML with validated loading.
+- [x] Unit tests for config/security/adapter/failover pass.
+- [x] MCP smoke run is successful in the target environment.
+- [x] `README.md` documents setup, config, and migration behavior.
 
 ## Notes
 - Keep diffs incremental and reviewable; avoid broad rewrites in one commit.
 - Preserve existing output format unless a change is explicitly documented.
 - Prefer `logging` over `print` for runtime events.
 - Configure logging handlers to `stderr` to protect MCP JSON-RPC transport on `stdout`.
+- Verification snapshot (2026-02-09):
+  - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'` -> `15 passed`
+  - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -c "from model_bridge.main import mcp; print(type(mcp).__name__)"'` -> `FastMCP`
