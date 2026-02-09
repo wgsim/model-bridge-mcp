@@ -22,4 +22,9 @@ dependencies:
   - tzdata=2025c=hc9c84f9_1
   - wheel=0.46.3=pyhd8ed1ab_0
   - pip:
+      - iniconfig==2.3.0
+      - pluggy==1.6.0
+      - pygments==2.19.2
+      - pytest==9.0.2
       - pyyaml==6.0.3
+prefix: /opt/homebrew/Caskroom/miniconda/base/envs/model-bridge-mcp_dev
