@@ -36,8 +36,8 @@
 - Baseline allocator scripts and migration plan are versioned.
 
 ### Included Files
-- `coder_ai_allocator_v1.0.py`
-- `coder_ai_allocator_v1.1.py`
+- `archive/coder_ai_allocator_v1.0.py`
+- `archive/coder_ai_allocator_v1.1.py`
 - `DEVELOPMENT_PLAN.md`
 
 ### Highlights

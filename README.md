@@ -1,6 +1,6 @@
 # model-bridge-mcp
 
-This project modularizes the monolithic MCP server from `coder_ai_allocator_v1.0.py` / `coder_ai_allocator_v1.1.py` into the `src/model_bridge` structure.
+This project modularizes the monolithic MCP server from `archive/coder_ai_allocator_v1.0.py` / `archive/coder_ai_allocator_v1.1.py` into the `src/model_bridge` structure.
 
 ## Architecture
 ```text
@@ -129,8 +129,8 @@ conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'
 
 ## Migration Note
 - Legacy source:
-  - `coder_ai_allocator_v1.0.py`
-  - `coder_ai_allocator_v1.1.py`
+  - `archive/coder_ai_allocator_v1.0.py`
+  - `archive/coder_ai_allocator_v1.1.py`
 - New entrypoint:
   - `src/model_bridge/main.py`
 - Existing tool signatures are preserved:

@@ -1,12 +1,12 @@
 # Development Plan: Model Bridge MCP
 
 ## Goal
-Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_allocator_v1.1.py`) into a modular MCP package (`model-bridge-mcp`) while preserving current tool behavior (`ask_chatgpt_cli`, `ask_gemini_cli`, `ask_ollama`), failover flow, and security guarantees.
+Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `archive/coder_ai_allocator_v1.1.py`) into a modular MCP package (`model-bridge-mcp`) while preserving current tool behavior (`ask_chatgpt_cli`, `ask_gemini_cli`, `ask_ollama`), failover flow, and security guarantees.
 
 ## Scope Baseline (Current State)
 - Python files currently present:
-  - `coder_ai_allocator_v1.0.py`
-  - `coder_ai_allocator_v1.1.py`
+  - `archive/coder_ai_allocator_v1.0.py`
+  - `archive/coder_ai_allocator_v1.1.py`
 - No `server.py` exists in this repository.
 - Current code already includes:
   - `FastMCP` tool registration
@@ -64,7 +64,7 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
 
 - [x] **Task 6: Documentation and Operational Checks**
     - Write `README.md` with setup, config, failover behavior, and security boundaries.
-    - Document migration note from `coder_ai_allocator_v1.1.py` to `src/model_bridge/main.py`.
+    - Document migration note from `archive/coder_ai_allocator_v1.1.py` to `src/model_bridge/main.py`.
     - → Verify:
       - Fresh setup from README works in clean venv.
       - Health-check output and routing-log examples match actual runtime format.
@@ -105,6 +105,71 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
 - Add typed response contract tests for MCP tool outputs.
 - Add structured operational telemetry (request id, routing tier, latency).
 - Add `list_ollama_models` usage examples to client integration docs.
+
+## Phase 2 Checklist (Security, Reliability, Testability)
+### P0 (Start First)
+- [ ] **P0-1: Prevent prompt leakage in process args**
+  - Change adapter execution to send prompt via `stdin` instead of argv tail.
+  - Keep command signature compatibility for `codex`, `gemini`, `ollama run <model>`.
+  - Verify:
+    - Subprocess unit tests pass with `stdin` assertions.
+    - Prompt text is not present in process argument construction path.
+
+- [ ] **P0-2: Harden file write path validation**
+  - In `save_to_file`, resolve destination using `realpath` before security path checks.
+  - Reject writes resolving to protected system prefixes.
+  - Verify:
+    - Symlink-based bypass test fails as expected.
+    - Legitimate project-local paths still save successfully.
+
+- [ ] **P0-3: Wire sanitizer rules from config**
+  - Remove hardcoded sanitizer rule sources as runtime truth.
+  - Load `security.block_patterns` and `security.sensitive_paths` from validated config.
+  - Verify:
+    - Config override fixture changes sanitizer behavior deterministically.
+    - Missing/invalid security fields fail with clear validation errors.
+
+### P1 (After P0)
+- [ ] **P1-1: Add subprocess timeout controls**
+  - Add configurable timeout in YAML/runtime for sync + async subprocess execution.
+  - Return controlled timeout error message for failover handling.
+  - Verify:
+    - Timeout unit tests for sync and async paths.
+
+- [ ] **P1-2: Tighten adapter interface contract**
+  - Extend `CLIAdapter` with async method contract (`run_async`).
+  - Reduce `Any` usage in `FailoverManager` via protocol/type-safe interfaces.
+  - Verify:
+    - Type-check and unit tests pass with no behavioral change.
+
+- [ ] **P1-3: Add missing direct unit tests (high-value targets)**
+  - Add tests for:
+    - `clean_markdown_fences`
+    - `_cleanup_old_meta_logs`
+    - `_resolve_fallback_chain`
+    - `save_to_file` path rejection
+    - `ask_ollama` security-block early return
+  - Verify:
+    - Added tests fail before implementation (where applicable) and pass after fix.
+
+### P2 (Maintainability / Ops)
+- [ ] **P2-1: Improve test/dev ergonomics**
+  - Add pytest config in `pyproject.toml` (pythonpath/testpaths).
+  - Expand `.gitignore` for common Python/dev artifacts.
+
+- [ ] **P2-2: Refine initialization design**
+  - Move import-time global initialization to lazy-init/factory pattern.
+  - Preserve MCP external behavior and tool signatures.
+
+- [ ] **P2-3: Clean legacy layout**
+  - Move legacy scripts to `archive/` or document deprecation policy clearly.
+  - Keep migration traceability in README/release notes.
+
+### Tracking and Execution
+- Canonical execution plan: `docs/plans/2026-02-10-phase2-hardening-plan.md`
+- Recommended order: `P0-1 -> P0-2 -> P0-3 -> P1-* -> P2-*`
+- Validation gate for each task:
+  - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'`
 
 ## Done When
 - [x] `src/model_bridge/` modular structure replaces monolithic flow without tool-level behavior regression.
