@@ -4,6 +4,6 @@ repos:
       - id: unit-tests
         name: unit-tests
         language: system
-        entry: conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'
+        entry: conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests'
         pass_filenames: false
         always_run: true

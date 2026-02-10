@@ -14,6 +14,9 @@
   - `tests/unit/test_response_contracts.py`
 - Added JSON Schema contract for MCP JSON output:
   - `schemas/list_ollama_models.schema.json`
+- Added integration smoke tests for tool entrypoints:
+  - `tests/integration/test_tool_smoke.py`
+- Updated local/CI test command from `tests/unit` to `tests`.
 - Added structured telemetry in failover manager:
   - logger: `model_bridge.telemetry`
   - fields: `request_id`, `routing_tier`, `latency_ms`, `status`, `error_category`
@@ -22,8 +25,8 @@
 - Added `list_ollama_models` usage/parsing examples in `README.md`.
 
 ### Verification Snapshot
-- `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'`
-- Result: `54 passed`
+- `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests'`
+- Result: `60 passed`
 
 ## v0.0.2 - 2026-02-09
 

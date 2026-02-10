@@ -156,8 +156,12 @@ Telemetry note:
 
 ## Tests
 ```bash
-conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'
+conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests'
 ```
+
+Integration smoke coverage:
+- `tests/integration/test_tool_smoke.py`
+- verifies `ask_chatgpt_cli`, `ask_gemini_cli`, `ask_ollama`, and `list_ollama_models` entrypoint paths with minimal mocks.
 
 ## Migration Note
 - Legacy source:

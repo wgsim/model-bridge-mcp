@@ -25,9 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e . pytest pre-commit
 
-      - name: Run unit tests
+      - name: Run test suite
         shell: bash -l {0}
-        run: PYTHONPATH=src pytest -q tests/unit
+        run: PYTHONPATH=src pytest -q tests
 
       - name: Run pre-commit hooks
         shell: bash -l {0}
