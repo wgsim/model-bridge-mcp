@@ -16,12 +16,12 @@ def test_ask_ollama_resolves_alias_before_adapter_call(monkeypatch):
     monkeypatch.setattr(
         main_module,
         "_get_installed_ollama_models",
-        lambda: (["llama3.2", "qwen3-coder:30b-a3b-q8_0"], ""),
+        lambda: (["gpt-oss:20b", "qwen3-coder-next:Q4_K_M"], ""),
     )
     result = asyncio.run(main_module.ask_ollama("hello", model="coder"))
 
     assert captured["service_name"] == "ollama"
-    assert captured["args"] == ["qwen3-coder:30b-a3b-q8_0"]
+    assert captured["args"] == ["qwen3-coder-next:Q4_K_M"]
     assert result.startswith("[Source: Ollama]")
 
 
@@ -38,17 +38,17 @@ def test_ask_ollama_uses_default_alias_when_model_not_provided(monkeypatch):
         return True, "ok"
 
     monkeypatch.setattr(main_module.ADAPTER, "run_async", _fake_run_async)
-    monkeypatch.setattr(main_module, "_get_installed_ollama_models", lambda: (["llama3.2"], ""))
+    monkeypatch.setattr(main_module, "_get_installed_ollama_models", lambda: (["gpt-oss:20b"], ""))
 
     result = asyncio.run(main_module.ask_ollama("hello"))
     assert result.startswith("[Source: Ollama]")
-    assert captured["args"] == ["llama3.2"]
+    assert captured["args"] == ["gpt-oss:20b"]
 
 
 def test_ask_ollama_returns_install_error_when_requested_model_not_installed(monkeypatch):
-    monkeypatch.setattr(main_module, "_get_installed_ollama_models", lambda: (["llama3.2"], ""))
+    monkeypatch.setattr(main_module, "_get_installed_ollama_models", lambda: (["gpt-oss:20b"], ""))
     result = asyncio.run(main_module.ask_ollama("hello", model="coder"))
-    assert result.startswith("[MODEL ERROR] Requested model 'qwen3-coder:30b-a3b-q8_0' is not installed")
+    assert result.startswith("[MODEL ERROR] Requested model 'qwen3-coder-next:Q4_K_M' is not installed")
 
 
 def test_ask_ollama_tries_local_fallback_chain_before_cloud(monkeypatch):
@@ -56,9 +56,9 @@ def test_ask_ollama_tries_local_fallback_chain_before_cloud(monkeypatch):
 
     async def _fake_run_async(service_name, args, input_text):
         calls.append((service_name, args, input_text))
-        if args == ["llama3.2"]:
+        if args == ["gpt-oss:20b"]:
             return False, "first model failed"
-        if args == ["qwen3-coder:30b-a3b-q8_0"]:
+        if args == ["qwen3-coder-next:Q4_K_M"]:
             return True, "fallback ok"
         return False, "unknown"
 
@@ -69,11 +69,11 @@ def test_ask_ollama_tries_local_fallback_chain_before_cloud(monkeypatch):
     monkeypatch.setattr(
         main_module,
         "_get_installed_ollama_models",
-        lambda: (["llama3.2", "qwen3-coder:30b-a3b-q8_0"], ""),
+        lambda: (["gpt-oss:20b", "qwen3-coder-next:Q4_K_M"], ""),
     )
     monkeypatch.setattr(main_module.FAILOVER, "execute_async", _fake_cloud)
 
     result = asyncio.run(main_module.ask_ollama("hello", model="default"))
     assert result.startswith("[Source: Ollama]")
-    assert calls[0][1] == ["llama3.2"]
-    assert calls[1][1] == ["qwen3-coder:30b-a3b-q8_0"]
+    assert calls[0][1] == ["gpt-oss:20b"]
+    assert calls[1][1] == ["qwen3-coder-next:Q4_K_M"]

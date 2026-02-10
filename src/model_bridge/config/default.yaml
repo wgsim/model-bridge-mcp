@@ -16,15 +16,16 @@ routing:
     ask_ollama_cloud_fallback: ["codex", "gemini"]
 
 models:
-  ollama_default_model: "llama3.2"
-  ollama_final_backup_model: "qwen3-coder:30b-a3b-q8_0"
+  ollama_default_model: "gpt-oss:20b"
+  ollama_final_backup_model: "qwen3-coder-next:Q4_K_M"
   ollama_catalog:
-    - "llama3.2"
-    - "qwen3-coder:30b-a3b-q8_0"
+    - "gpt-oss:20b"
+    - "glm-4.7-flash:Q8_0"
+    - "qwen3-coder-next:Q4_K_M"
   ollama_aliases:
-    default: "llama3.2"
-    fast: "llama3.2"
-    coder: "qwen3-coder:30b-a3b-q8_0"
+    default: "gpt-oss:20b"
+    fast: "glm-4.7-flash:Q8_0"
+    coder: "qwen3-coder-next:Q4_K_M"
   ollama_local_fallback_chain:
     - "default"
     - "coder"

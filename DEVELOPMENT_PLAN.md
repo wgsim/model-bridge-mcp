@@ -54,7 +54,7 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
     - Register MCP tools with unchanged external signatures:
       - `ask_chatgpt_cli(prompt, save_path=None, force_model=False)`
       - `ask_gemini_cli(prompt, save_path=None, force_model=False)`
-      - `ask_ollama(prompt, save_path=None, model="llama3.2")`
+      - `ask_ollama(prompt, save_path=None, model="default")`
     - Wire config loader + failover manager + sanitizer.
     - → Verify:
       - Import smoke: `python -c "from model_bridge.main import mcp"` succeeds.
@@ -82,23 +82,29 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
 
 ## Phase 2 Improvements (Post-MVP)
 - Phase boundary policy: preserve behavior-compatible modular migration in Phase 1; defer performance/operability enhancements to Phase 2 unless they are required to prevent protocol breakage or correctness issues.
-- [ ] **Async Execution Path**
+- [x] **Async Execution Path**
   - Replace blocking `subprocess.run` calls with `asyncio.create_subprocess_exec`.
   - Goal: keep MCP server responsive during long-running model calls.
   - Verify:
     - Concurrent tool-call scenario does not block unrelated requests.
 
-- [ ] **Typed Config Validation**
+- [x] **Typed Config Validation**
   - Add `pydantic` models for config schema (CLI commands, models, routing, security options).
   - Goal: fail fast with clear validation errors for missing/invalid keys.
   - Verify:
     - Invalid config fixtures produce deterministic validation errors at startup.
 
-- [ ] **CLI Entrypoint for Operations**
+- [x] **CLI Entrypoint for Operations**
   - Add `[project.scripts]` entry in `pyproject.toml` (for example: `model-bridge = model_bridge.main:run`).
   - Goal: simplify launch/ops flow and reduce command ambiguity.
   - Verify:
     - After install, script-based startup works in clean venv.
+
+## Next Candidates
+- Add CI workflow (pytest + pre-commit run) for PR gate.
+- Add typed response contract tests for MCP tool outputs.
+- Add structured operational telemetry (request id, routing tier, latency).
+- Add `list_ollama_models` usage examples to client integration docs.
 
 ## Done When
 - [x] `src/model_bridge/` modular structure replaces monolithic flow without tool-level behavior regression.
@@ -113,5 +119,5 @@ Migrate monolithic allocator scripts (`coder_ai_allocator_v1.0.py`, `coder_ai_al
 - Prefer `logging` over `print` for runtime events.
 - Configure logging handlers to `stderr` to protect MCP JSON-RPC transport on `stdout`.
 - Verification snapshot (2026-02-09):
-  - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'` -> `15 passed`
+  - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'` -> `39 passed`
   - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -c "from model_bridge.main import mcp; print(type(mcp).__name__)"'` -> `FastMCP`
