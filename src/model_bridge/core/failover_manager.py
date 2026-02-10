@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, List, Sequence
+from typing import Any, List, Protocol, Sequence
+
+from model_bridge.adapters.base import CLIAdapter
+
+
+class SanitizerProtocol(Protocol):
+    """Protocol for prompt sanitizer implementations."""
+
+    @staticmethod
+    def inspect(prompt: str, mode: str = "execution") -> tuple[bool, str]:
+        """Return (is_safe, message)."""
 
 
 class FailoverManager:
     """Route execution through primary -> secondary -> optional tertiary."""
 
-    def __init__(self, adapter: Any, sanitizer: Any, config: dict[str, Any]) -> None:
+    def __init__(
+        self, adapter: CLIAdapter, sanitizer: SanitizerProtocol, config: dict[str, Any]
+    ) -> None:
         self.adapter = adapter
         self.sanitizer = sanitizer
         self.config = config
@@ -23,10 +35,7 @@ class FailoverManager:
     async def _run_adapter(
         self, service_name: str, args: Sequence[str], input_text: str
     ) -> tuple[bool, str]:
-        run_async = getattr(self.adapter, "run_async", None)
-        if callable(run_async):
-            return await run_async(service_name, args, input_text)
-        return self.adapter.run(service_name, args, input_text)
+        return await self.adapter.run_async(service_name, args, input_text)
 
     def execute(
         self,

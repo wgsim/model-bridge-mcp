@@ -89,6 +89,7 @@ class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     system_suffix: str
     apply_system_suffix: RuntimeApplySystemSuffix
+    subprocess_timeout_seconds: float = Field(default=120.0, gt=0)
 
 
 class AppConfig(BaseModel):

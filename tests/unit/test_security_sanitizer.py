@@ -45,3 +45,9 @@ def test_inspect_uses_configured_sensitive_paths():
 
     assert ok is False
     assert "critical system path '/custom/protected/'" in message
+
+
+def test_inspect_accepts_unknown_mode_without_crash():
+    ok, message = SecuritySanitizer.inspect("safe prompt", mode="custom_mode")
+    assert ok is True
+    assert message == ""

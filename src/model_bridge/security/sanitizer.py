@@ -36,7 +36,11 @@ class SecuritySanitizer:
 
     @classmethod
     def inspect(cls, prompt: str, mode: str = "execution") -> Tuple[bool, str]:
-        del mode  # Kept for backward-compatible signature.
+        normalized_mode = (mode or "execution").strip().lower()
+        if normalized_mode not in {"execution", "analysis"}:
+            logging.getLogger("model_bridge.security").warning(
+                "Unknown inspect mode '%s'; using execution safeguards.", mode
+            )
         for pattern in cls.BLOCK_PATTERNS:
             if re.search(pattern, prompt):
                 return (
@@ -47,7 +51,7 @@ class SecuritySanitizer:
         for path in cls.SENSITIVE_PATHS:
             if path in prompt:
                 logging.getLogger("model_bridge.security").warning(
-                    "Sensitive path access blocked: %s", path
+                    "Sensitive path access blocked in %s mode: %s", normalized_mode, path
                 )
                 return (
                     False,

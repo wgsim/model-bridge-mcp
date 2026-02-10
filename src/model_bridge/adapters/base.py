@@ -13,3 +13,8 @@ class CLIAdapter(ABC):
     def run(self, service_name: str, args: Sequence[str], input_text: str) -> Tuple[bool, str]:
         """Run service command and return (success, output)."""
 
+    @abstractmethod
+    async def run_async(
+        self, service_name: str, args: Sequence[str], input_text: str
+    ) -> Tuple[bool, str]:
+        """Run service command asynchronously and return (success, output)."""

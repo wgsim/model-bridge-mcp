@@ -20,11 +20,13 @@ class SubprocessAdapter(CLIAdapter):
         env: Mapping[str, str] | None = None,
         system_suffix: str = "",
         apply_system_suffix_for: Mapping[str, bool] | None = None,
+        timeout_seconds: float | None = None,
     ) -> None:
         self.cli_config = cli_config
         self.env = dict(env) if env is not None else os.environ.copy()
         self.system_suffix = system_suffix
         self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
+        self.timeout_seconds = timeout_seconds
 
     def _prepare_command(
         self, service_name: str, args: Sequence[str], input_text: str
@@ -54,7 +56,10 @@ class SubprocessAdapter(CLIAdapter):
                 input=full_input,
                 env=self.env,
                 check=False,
+                timeout=self.timeout_seconds,
             )
+        except subprocess.TimeoutExpired:
+            return False, f"Timeout Error: Command '{service_name}' exceeded {self.timeout_seconds}s"
         except Exception as exc:
             return False, str(exc)
 
@@ -76,7 +81,17 @@ class SubprocessAdapter(CLIAdapter):
                 stderr=asyncio.subprocess.PIPE,
                 env=self.env,
             )
-            stdout_bytes, stderr_bytes = await proc.communicate(full_input.encode("utf-8"))
+            if self.timeout_seconds is None:
+                stdout_bytes, stderr_bytes = await proc.communicate(full_input.encode("utf-8"))
+            else:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(full_input.encode("utf-8")),
+                    timeout=self.timeout_seconds,
+                )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return False, f"Timeout Error: Command '{service_name}' exceeded {self.timeout_seconds}s"
         except Exception as exc:
             return False, str(exc)
 

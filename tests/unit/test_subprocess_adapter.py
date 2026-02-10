@@ -143,3 +143,54 @@ def test_run_skips_suffix_when_service_flag_is_false():
     called_cmd = run_mock.call_args.args[0]
     assert called_cmd == ["ollama", "run", "llama3.2"]
     assert run_mock.call_args.kwargs["input"] == "hello"
+
+
+def test_run_returns_timeout_error_when_subprocess_hangs():
+    adapter = SubprocessAdapter(_build_config(), timeout_seconds=3.0)
+    timeout_exc = subprocess.TimeoutExpired(cmd=["ollama", "run"], timeout=3.0)
+    with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
+        "subprocess.run", side_effect=timeout_exc
+    ):
+        ok, output = adapter.run("ollama", ["llama3.2"], "hello")
+
+    assert ok is False
+    assert output == "Timeout Error: Command 'ollama' exceeded 3.0s"
+
+
+def test_run_async_returns_timeout_error_when_subprocess_hangs():
+    adapter = SubprocessAdapter(_build_config(), timeout_seconds=2.0)
+
+    class _Proc:
+        returncode = None
+
+        def __init__(self):
+            self.killed = False
+            self.waited = False
+
+        async def communicate(self, input=None):  # pragma: no cover
+            return b"", b""
+
+        def kill(self):
+            self.killed = True
+
+        async def wait(self):
+            self.waited = True
+
+    proc = _Proc()
+
+    async def _fake_exec(*args, **kwargs):
+        return proc
+
+    async def _fake_wait_for(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
+        "asyncio.create_subprocess_exec", side_effect=_fake_exec
+    ), patch("asyncio.wait_for", side_effect=_fake_wait_for):
+        ok, output = asyncio.run(adapter.run_async("ollama", ["llama3.2"], "hello"))
+
+    assert ok is False
+    assert output == "Timeout Error: Command 'ollama' exceeded 2.0s"
+    assert proc.killed is True
+    assert proc.waited is True

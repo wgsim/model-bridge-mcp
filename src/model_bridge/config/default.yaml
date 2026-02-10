@@ -46,6 +46,7 @@ security:
 
 runtime:
   system_suffix: "\n\n[SYSTEM INSTRUCTION: Return raw code/text only. Do NOT use emojis. Do NOT use markdown code blocks.]"
+  subprocess_timeout_seconds: 120
   apply_system_suffix:
     codex: true
     gemini: true

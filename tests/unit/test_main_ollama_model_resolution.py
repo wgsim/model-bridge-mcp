@@ -77,3 +77,18 @@ def test_ask_ollama_tries_local_fallback_chain_before_cloud(monkeypatch):
     assert result.startswith("[Source: Ollama]")
     assert calls[0][1] == ["gpt-oss:20b"]
     assert calls[1][1] == ["qwen3-coder-next:Q4_K_M"]
+
+
+def test_ask_ollama_returns_security_block_before_adapter_call(monkeypatch):
+    async def _raise_if_called(*args, **kwargs):
+        raise AssertionError("adapter should not be called on security block")
+
+    monkeypatch.setattr(main_module.ADAPTER, "run_async", _raise_if_called)
+    monkeypatch.setattr(
+        main_module.SecuritySanitizer,
+        "inspect",
+        classmethod(lambda cls, prompt, mode="execution": (False, "[SECURITY BLOCK] blocked")),
+    )
+
+    result = asyncio.run(main_module.ask_ollama("blocked prompt", model="default"))
+    assert result == "[SECURITY BLOCK] blocked"

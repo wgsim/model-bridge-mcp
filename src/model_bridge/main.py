@@ -26,18 +26,27 @@ DEBUG_META_DIR = ".model_bridge/tmp"
 DEBUG_META_TTL_SECONDS = 48 * 60 * 60
 
 mcp = FastMCP("Model Bridge MCP")
-CONFIG = load_config()
-SecuritySanitizer.configure(
-    block_patterns=CONFIG["security"]["block_patterns"],
-    sensitive_paths=CONFIG["security"]["sensitive_paths"],
-)
-ADAPTER = SubprocessAdapter(
-    cli_config=CONFIG["commands"],
-    env=os.environ.copy(),
-    system_suffix=CONFIG["runtime"]["system_suffix"],
-    apply_system_suffix_for=CONFIG["runtime"]["apply_system_suffix"],
-)
-FAILOVER = FailoverManager(adapter=ADAPTER, sanitizer=SecuritySanitizer, config=CONFIG)
+
+
+def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
+    """Build runtime dependencies for production and tests."""
+    resolved_config = config if config is not None else load_config()
+    SecuritySanitizer.configure(
+        block_patterns=resolved_config["security"]["block_patterns"],
+        sensitive_paths=resolved_config["security"]["sensitive_paths"],
+    )
+    adapter = SubprocessAdapter(
+        cli_config=resolved_config["commands"],
+        env=os.environ.copy(),
+        system_suffix=resolved_config["runtime"]["system_suffix"],
+        apply_system_suffix_for=resolved_config["runtime"]["apply_system_suffix"],
+        timeout_seconds=resolved_config["runtime"]["subprocess_timeout_seconds"],
+    )
+    failover = FailoverManager(adapter=adapter, sanitizer=SecuritySanitizer, config=resolved_config)
+    return resolved_config, adapter, failover
+
+
+CONFIG, ADAPTER, FAILOVER = build_runtime()
 
 
 def clean_markdown_fences(content: str) -> str:
@@ -107,13 +116,14 @@ def _save_debug_meta(
 ) -> str:
     os.makedirs(debug_dir, exist_ok=True)
     _cleanup_old_meta_logs(debug_dir, ttl_seconds=ttl_seconds)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    now_utc = datetime.now(timezone.utc)
+    ts = now_utc.strftime("%Y%m%dT%H%M%SZ")
     filename = f"{ts}_{tool_name}_{time.time_ns()}.meta.log"
     meta_path = os.path.join(debug_dir, filename)
     sanitized_response = _mask_sensitive_text(response)
     with open(meta_path, "w", encoding="utf-8") as handle:
         handle.write(f"tool: {tool_name}\n")
-        handle.write(f"created_at_utc: {datetime.now(timezone.utc).isoformat()}\n")
+        handle.write(f"created_at_utc: {now_utc.isoformat()}\n")
         handle.write("\n")
         handle.write(sanitized_response)
     return meta_path
@@ -177,8 +187,8 @@ def _mask_sensitive_text(text: str) -> str:
 
 def _normalize_model_name(name: str) -> str:
     value = name.strip()
-    if value.endswith(":latest"):
-        return value[: -len(":latest")]
+    while value.endswith(":latest"):
+        value = value[: -len(":latest")]
     return value
 
 

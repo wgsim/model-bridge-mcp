@@ -12,6 +12,9 @@ class _FakeAdapter:
         self.calls.append((service_name, list(args), input_text))
         return self.responses[(service_name, tuple(args))]
 
+    async def run_async(self, service_name, args, input_text):
+        return self.run(service_name, args, input_text)
+
 
 class _AllowAllSanitizer:
     @staticmethod
