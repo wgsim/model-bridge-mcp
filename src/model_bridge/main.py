@@ -27,6 +27,10 @@ DEBUG_META_TTL_SECONDS = 48 * 60 * 60
 
 mcp = FastMCP("Model Bridge MCP")
 CONFIG = load_config()
+SecuritySanitizer.configure(
+    block_patterns=CONFIG["security"]["block_patterns"],
+    sensitive_paths=CONFIG["security"]["sensitive_paths"],
+)
 ADAPTER = SubprocessAdapter(
     cli_config=CONFIG["commands"],
     env=os.environ.copy(),
