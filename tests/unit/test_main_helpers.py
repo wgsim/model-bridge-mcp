@@ -38,7 +38,7 @@ def test_resolve_fallback_chain_deduplicates_and_skips_unknown(monkeypatch):
         "ollama_catalog": ["gpt-oss:20b", "qwen3-coder-next:Q4_K_M"],
         "ollama_local_fallback_chain": ["default", "unknown", "coder", "default"],
     }
-    monkeypatch.setitem(main_module.CONFIG, "models", models_cfg)
+    monkeypatch.setattr(main_module, "_get_config", lambda: {"models": models_cfg})
 
     chain = main_module._resolve_fallback_chain("gpt-oss:20b")
 
@@ -52,3 +52,28 @@ def test_save_to_file_rejects_system_path():
 
 def test_normalize_model_name_strips_repeated_latest_suffix():
     assert main_module._normalize_model_name("model:latest:latest") == "model"
+
+
+def test_runtime_is_initialized_lazily_once(monkeypatch):
+    calls = {"count": 0}
+    fake_config = {"models": {}}
+
+    class _Adapter:
+        pass
+
+    class _Failover:
+        pass
+
+    def _fake_build_runtime(config=None):
+        calls["count"] += 1
+        return fake_config, _Adapter(), _Failover()
+
+    monkeypatch.setattr(main_module, "build_runtime", _fake_build_runtime)
+    monkeypatch.setattr(main_module, "CONFIG", None)
+    monkeypatch.setattr(main_module, "ADAPTER", None)
+    monkeypatch.setattr(main_module, "FAILOVER", None)
+
+    assert main_module._get_config() is fake_config
+    assert isinstance(main_module._get_adapter(), _Adapter)
+    assert isinstance(main_module._get_failover(), _Failover)
+    assert calls["count"] == 1

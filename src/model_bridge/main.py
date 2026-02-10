@@ -27,6 +27,10 @@ DEBUG_META_TTL_SECONDS = 48 * 60 * 60
 
 mcp = FastMCP("Model Bridge MCP")
 
+CONFIG: Optional[dict] = None
+ADAPTER: Optional[SubprocessAdapter] = None
+FAILOVER: Optional[FailoverManager] = None
+
 
 def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
     """Build runtime dependencies for production and tests."""
@@ -46,7 +50,29 @@ def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapte
     return resolved_config, adapter, failover
 
 
-CONFIG, ADAPTER, FAILOVER = build_runtime()
+def _ensure_runtime() -> None:
+    global CONFIG, ADAPTER, FAILOVER
+    if CONFIG is not None and ADAPTER is not None and FAILOVER is not None:
+        return
+    CONFIG, ADAPTER, FAILOVER = build_runtime()
+
+
+def _get_config() -> dict:
+    _ensure_runtime()
+    assert CONFIG is not None
+    return CONFIG
+
+
+def _get_adapter() -> SubprocessAdapter:
+    _ensure_runtime()
+    assert ADAPTER is not None
+    return ADAPTER
+
+
+def _get_failover() -> FailoverManager:
+    _ensure_runtime()
+    assert FAILOVER is not None
+    return FAILOVER
 
 
 def clean_markdown_fences(content: str) -> str:
@@ -147,7 +173,7 @@ def _save_if_requested(
 
 
 def _resolve_ollama_model(model_arg: str) -> tuple[str | None, str]:
-    models_cfg = CONFIG["models"]
+    models_cfg = _get_config()["models"]
     aliases = models_cfg.get("ollama_aliases", {})
     catalog = set(models_cfg.get("ollama_catalog", []))
     token = (model_arg or "").strip()
@@ -193,7 +219,7 @@ def _normalize_model_name(name: str) -> str:
 
 
 def _resolve_fallback_chain(requested_model: str) -> list[str]:
-    models_cfg = CONFIG["models"]
+    models_cfg = _get_config()["models"]
     aliases = models_cfg["ollama_aliases"]
     catalog = set(models_cfg["ollama_catalog"])
     chain_tokens = models_cfg.get("ollama_local_fallback_chain", [])
@@ -251,7 +277,7 @@ def _get_installed_ollama_models() -> tuple[list[str], str]:
 
 @mcp.tool()
 async def ask_chatgpt_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
-    response = await FAILOVER.execute_async(
+    response = await _get_failover().execute_async(
         "codex", "gemini", prompt, "execution", force_primary=force_model
     )
     return _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
@@ -259,7 +285,7 @@ async def ask_chatgpt_cli(prompt: str, save_path: str = None, force_model: bool 
 
 @mcp.tool()
 async def ask_gemini_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
-    response = await FAILOVER.execute_async(
+    response = await _get_failover().execute_async(
         "gemini", "codex", prompt, "analysis", force_primary=force_model
     )
     return _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
@@ -298,7 +324,7 @@ async def ask_ollama(prompt: str, save_path: str = None, model: str = "default")
 
     last_local_error = ""
     for local_model in local_chain:
-        success, output = await ADAPTER.run_async("ollama", [local_model], prompt)
+        success, output = await _get_adapter().run_async("ollama", [local_model], prompt)
         if success:
             response = f"[Source: Ollama]\n{output}"
             return _save_if_requested(response, save_path, tool_name="ask_ollama")
@@ -308,7 +334,7 @@ async def ask_ollama(prompt: str, save_path: str = None, model: str = "default")
     cloud_prompt = f"[WARNING: Local Ollama failed. Executing via Cloud Backup] {prompt}"
     if last_local_error:
         cloud_prompt = f"{cloud_prompt}\n\n[Local Error Summary]\n{last_local_error}"
-    response = await FAILOVER.execute_async(
+    response = await _get_failover().execute_async(
         "codex",
         "gemini",
         cloud_prompt,
@@ -321,7 +347,7 @@ async def ask_ollama(prompt: str, save_path: str = None, model: str = "default")
 
 @mcp.tool()
 def list_ollama_models() -> str:
-    models_cfg = CONFIG["models"]
+    models_cfg = _get_config()["models"]
     default_model = models_cfg["ollama_default_model"]
     aliases = models_cfg["ollama_aliases"]
     catalog = models_cfg["ollama_catalog"]
@@ -330,7 +356,7 @@ def list_ollama_models() -> str:
     installed_normalized = {_normalize_model_name(name) for name in installed}
     missing = [name for name in catalog if _normalize_model_name(name) not in installed_normalized]
     effective_default = aliases.get("default", default_model)
-    recommended_aliases = CONFIG["models"].get("ollama_local_fallback_chain", [])
+    recommended_aliases = _get_config()["models"].get("ollama_local_fallback_chain", [])
 
     status = "ok" if not error else "unavailable"
     payload = {

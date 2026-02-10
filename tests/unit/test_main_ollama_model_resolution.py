@@ -12,7 +12,11 @@ def test_ask_ollama_resolves_alias_before_adapter_call(monkeypatch):
         captured["input_text"] = input_text
         return True, "ok"
 
-    monkeypatch.setattr(main_module.ADAPTER, "run_async", _fake_run_async)
+    class _Adapter:
+        async def run_async(self, service_name, args, input_text):
+            return await _fake_run_async(service_name, args, input_text)
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: _Adapter())
     monkeypatch.setattr(
         main_module,
         "_get_installed_ollama_models",
@@ -37,7 +41,11 @@ def test_ask_ollama_uses_default_alias_when_model_not_provided(monkeypatch):
         captured["args"] = args
         return True, "ok"
 
-    monkeypatch.setattr(main_module.ADAPTER, "run_async", _fake_run_async)
+    class _Adapter:
+        async def run_async(self, service_name, args, input_text):
+            return await _fake_run_async(service_name, args, input_text)
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: _Adapter())
     monkeypatch.setattr(main_module, "_get_installed_ollama_models", lambda: (["gpt-oss:20b"], ""))
 
     result = asyncio.run(main_module.ask_ollama("hello"))
@@ -65,13 +73,21 @@ def test_ask_ollama_tries_local_fallback_chain_before_cloud(monkeypatch):
     async def _fake_cloud(*args, **kwargs):
         raise AssertionError("cloud fallback should not be used when local fallback succeeds")
 
-    monkeypatch.setattr(main_module.ADAPTER, "run_async", _fake_run_async)
+    class _Adapter:
+        async def run_async(self, service_name, args, input_text):
+            return await _fake_run_async(service_name, args, input_text)
+
+    class _Failover:
+        async def execute_async(self, *args, **kwargs):
+            return await _fake_cloud(*args, **kwargs)
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: _Adapter())
     monkeypatch.setattr(
         main_module,
         "_get_installed_ollama_models",
         lambda: (["gpt-oss:20b", "qwen3-coder-next:Q4_K_M"], ""),
     )
-    monkeypatch.setattr(main_module.FAILOVER, "execute_async", _fake_cloud)
+    monkeypatch.setattr(main_module, "_get_failover", lambda: _Failover())
 
     result = asyncio.run(main_module.ask_ollama("hello", model="default"))
     assert result.startswith("[Source: Ollama]")
@@ -83,7 +99,11 @@ def test_ask_ollama_returns_security_block_before_adapter_call(monkeypatch):
     async def _raise_if_called(*args, **kwargs):
         raise AssertionError("adapter should not be called on security block")
 
-    monkeypatch.setattr(main_module.ADAPTER, "run_async", _raise_if_called)
+    class _Adapter:
+        async def run_async(self, *args, **kwargs):
+            return await _raise_if_called(*args, **kwargs)
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: _Adapter())
     monkeypatch.setattr(
         main_module.SecuritySanitizer,
         "inspect",

@@ -43,6 +43,10 @@ conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridg
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -c "from model_bridge.main import mcp; print(type(mcp).__name__)"'
 ```
 
+Runtime initialization note:
+- Runtime dependencies (`config`, `adapter`, `failover`) are initialized lazily on first tool call.
+- Importing `model_bridge.main` no longer eagerly loads runtime configuration.
+
 ### MCP run
 ```bash
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridge.main'

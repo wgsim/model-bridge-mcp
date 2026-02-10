@@ -17,6 +17,8 @@
 - Added structured telemetry in failover manager:
   - logger: `model_bridge.telemetry`
   - fields: `request_id`, `routing_tier`, `latency_ms`, `status`, `error_category`
+- Refined runtime initialization in `model_bridge.main`:
+  - switched from import-time eager initialization to lazy initialization on first use
 - Added `list_ollama_models` usage/parsing examples in `README.md`.
 
 ### Verification Snapshot
