@@ -16,7 +16,7 @@
   - `schemas/list_ollama_models.schema.json`
 - Added structured telemetry in failover manager:
   - logger: `model_bridge.telemetry`
-  - fields: `request_id`, `routing_tier`, `latency_ms`, `status`
+  - fields: `request_id`, `routing_tier`, `latency_ms`, `status`, `error_category`
 - Added `list_ollama_models` usage/parsing examples in `README.md`.
 
 ### Verification Snapshot

@@ -23,6 +23,12 @@ class _AllowSanitizer:
         return True, ""
 
 
+class _BlockSanitizer:
+    @staticmethod
+    def inspect(prompt, mode="execution"):
+        return False, "[SECURITY BLOCK] blocked"
+
+
 def _config():
     return {
         "routing": {
@@ -54,6 +60,26 @@ def test_failover_manager_emits_structured_telemetry(caplog):
         output = asyncio.run(manager.execute_async("codex", "gemini", "hello", mode="execution"))
 
     assert "secondary-ok" in output
-    assert any("request_id" in rec.message for rec in caplog.records)
-    assert any("latency_ms" in rec.message for rec in caplog.records)
-    assert any("routing_tier" in rec.message for rec in caplog.records)
+    telemetry = [json.loads(rec.message) for rec in caplog.records]
+    assert telemetry
+    event = telemetry[-1]
+    assert "request_id" in event
+    assert "latency_ms" in event
+    assert "routing_tier" in event
+    assert "error_category" in event
+    assert event["status"] == "success"
+    assert event["error_category"] == "primary_failed_recovered_secondary"
+
+
+def test_failover_manager_emits_security_block_error_category(caplog):
+    manager = FailoverManager(adapter=_ContractAdapter(), sanitizer=_BlockSanitizer(), config=_config())
+
+    with caplog.at_level(logging.INFO, logger="model_bridge.telemetry"):
+        output = asyncio.run(manager.execute_async("codex", "gemini", "hello", mode="execution"))
+
+    assert output == "[SECURITY BLOCK] blocked"
+    telemetry = [json.loads(rec.message) for rec in caplog.records]
+    assert telemetry
+    event = telemetry[-1]
+    assert event["status"] == "security_block"
+    assert event["error_category"] == "security_policy"

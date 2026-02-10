@@ -50,6 +50,7 @@ class FailoverManager:
         mode: str,
         routing_tier: int,
         status: str,
+        error_category: str,
         latency_ms: int,
     ) -> None:
         payload = {
@@ -59,6 +60,7 @@ class FailoverManager:
             "mode": mode,
             "routing_tier": routing_tier,
             "status": status,
+            "error_category": error_category,
             "latency_ms": latency_ms,
         }
         self.telemetry_logger.info(json.dumps(payload, ensure_ascii=False))
@@ -104,6 +106,7 @@ class FailoverManager:
                 mode=mode,
                 routing_tier=0,
                 status="security_block",
+                error_category="security_policy",
                 latency_ms=int((time.perf_counter() - start_ts) * 1000),
             )
             return sec_msg
@@ -121,6 +124,7 @@ class FailoverManager:
                 mode=mode,
                 routing_tier=1,
                 status="success",
+                error_category="none",
                 latency_ms=int((time.perf_counter() - start_ts) * 1000),
             )
             return self._format_response(output, routing_log)
@@ -134,6 +138,7 @@ class FailoverManager:
                 mode=mode,
                 routing_tier=1,
                 status="force_primary_failed",
+                error_category="primary_failed_forced",
                 latency_ms=int((time.perf_counter() - start_ts) * 1000),
             )
             return self._format_error(
@@ -152,6 +157,7 @@ class FailoverManager:
                 mode=mode,
                 routing_tier=2,
                 status="success",
+                error_category="primary_failed_recovered_secondary",
                 latency_ms=int((time.perf_counter() - start_ts) * 1000),
             )
             return self._format_response(output, routing_log)
@@ -171,6 +177,7 @@ class FailoverManager:
                     mode=mode,
                     routing_tier=3,
                     status="success",
+                    error_category="secondary_failed_recovered_tertiary",
                     latency_ms=int((time.perf_counter() - start_ts) * 1000),
                 )
                 return self._format_response(output, routing_log)
@@ -183,6 +190,7 @@ class FailoverManager:
             mode=mode,
             routing_tier=3 if allow_tertiary and primary != "ollama" else 2,
             status="failed",
+            error_category="all_services_failed",
             latency_ms=int((time.perf_counter() - start_ts) * 1000),
         )
         return self._format_error(routing_log, f"All services failed. Last Error: {output}")

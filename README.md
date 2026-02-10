@@ -141,6 +141,10 @@ Interpretation guide:
 - `missing`: configured models not currently installed.
 - `pull_commands`: ready-to-run install commands for missing models.
 
+Telemetry note:
+- `model_bridge.telemetry` logs structured events to stderr.
+- Current fields include `request_id`, `routing_tier`, `status`, `error_category`, and `latency_ms`.
+
 ## Security Boundaries
 - Destructive pattern blocking (`rm -rf`, `mkfs`, `dd if=`, `chmod 777`, fork bomb)
 - Sensitive system path access blocking (`/etc/`, `/var/`, `/boot/`, `/proc/`, `/root/`)
