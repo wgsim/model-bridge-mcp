@@ -27,9 +27,10 @@ The default configuration file is `src/model_bridge/config/default.yaml`.
 
 - `commands`: codex/gemini/ollama execution and health commands
 - `routing.default_chains`: default failover chain per tool
-- `models`: default/final-backup ollama models
+- `models`: default/final-backup ollama models, catalog, aliases, local fallback chain
 - `security`: block patterns and sensitive paths
 - `runtime.system_suffix`: CLI prompt suffix
+- `runtime.apply_system_suffix`: per-service suffix application policy
 
 Config loader verification:
 ```bash
@@ -46,6 +47,19 @@ conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -c "from model
 ```bash
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridge.main'
 ```
+
+## Ollama Model Selection
+`ask_ollama` now uses alias-first model resolution.
+
+- Default call: `model="default"`
+- Alias examples: `default`, `fast`, `coder`
+- Direct model names are allowed only when they exist in `models.ollama_catalog`
+
+Behavior:
+- Explicit model request (`model="coder"` etc.) performs local install precheck via `ollama list`.
+- If requested model is not installed, it returns:
+  - `[MODEL ERROR] ... Install with: ollama pull <model>`
+- For `model="default"`, local fallback chain (`models.ollama_local_fallback_chain`) is attempted before cloud fallback.
 
 ## Health Check Example
 The current operational health check verifies CLI availability from config.
@@ -89,6 +103,20 @@ Security block example:
 [SECURITY BLOCK] Access to critical system path '/etc/' is strictly FORBIDDEN.
 ```
 
+## Ollama Inventory Tool
+The MCP tool `list_ollama_models()` returns both configured and runtime availability info.
+
+Includes:
+- `default_model`
+- `effective_default`
+- `aliases`
+- `recommended_aliases`
+- `catalog`
+- `installed`
+- `missing`
+- `pull_commands`
+- `status` / `error`
+
 ## Security Boundaries
 - Destructive pattern blocking (`rm -rf`, `mkfs`, `dd if=`, `chmod 777`, fork bomb)
 - Sensitive system path access blocking (`/etc/`, `/var/`, `/boot/`, `/proc/`, `/root/`)
@@ -108,4 +136,4 @@ conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'
 - Existing tool signatures are preserved:
   - `ask_chatgpt_cli(prompt, save_path=None, force_model=False)`
   - `ask_gemini_cli(prompt, save_path=None, force_model=False)`
-  - `ask_ollama(prompt, save_path=None, model=\"llama3.2\")`
+  - `ask_ollama(prompt, save_path=None, model=\"default\")`
