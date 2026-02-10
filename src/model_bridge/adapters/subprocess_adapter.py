@@ -28,22 +28,22 @@ class SubprocessAdapter(CLIAdapter):
 
     def _prepare_command(
         self, service_name: str, args: Sequence[str], input_text: str
-    ) -> Tuple[bool, str, list[str]]:
+    ) -> Tuple[bool, str, list[str], str]:
         config = self.cli_config.get(service_name, {})
         cmd_base = list(config.get("exec", []))
         if not cmd_base:
-            return False, f"Configuration Error: No command defined for {service_name}", []
+            return False, f"Configuration Error: No command defined for {service_name}", [], ""
         if not shutil.which(cmd_base[0]):
-            return False, f"System Error: Command '{cmd_base[0]}' not found.", []
+            return False, f"System Error: Command '{cmd_base[0]}' not found.", [], ""
         if self.apply_system_suffix_for.get(service_name, True):
             full_input = input_text + self.system_suffix
         else:
             full_input = input_text
-        full_cmd = cmd_base + list(args) + [full_input]
-        return True, "", full_cmd
+        full_cmd = cmd_base + list(args)
+        return True, "", full_cmd, full_input
 
     def run(self, service_name: str, args: Sequence[str], input_text: str) -> Tuple[bool, str]:
-        ok, err, full_cmd = self._prepare_command(service_name, args, input_text)
+        ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
         if not ok:
             return False, err
         try:
@@ -51,6 +51,7 @@ class SubprocessAdapter(CLIAdapter):
                 full_cmd,
                 capture_output=True,
                 text=True,
+                input=full_input,
                 env=self.env,
                 check=False,
             )
@@ -64,17 +65,18 @@ class SubprocessAdapter(CLIAdapter):
     async def run_async(
         self, service_name: str, args: Sequence[str], input_text: str
     ) -> Tuple[bool, str]:
-        ok, err, full_cmd = self._prepare_command(service_name, args, input_text)
+        ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
         if not ok:
             return False, err
         try:
             proc = await asyncio.create_subprocess_exec(
                 *full_cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self.env,
             )
-            stdout_bytes, stderr_bytes = await proc.communicate()
+            stdout_bytes, stderr_bytes = await proc.communicate(full_input.encode("utf-8"))
         except Exception as exc:
             return False, str(exc)
 

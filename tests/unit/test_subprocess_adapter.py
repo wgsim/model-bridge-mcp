@@ -32,7 +32,8 @@ def test_run_returns_success_stdout():
     assert output == "ok-output"
     run_mock.assert_called_once()
     called_cmd = run_mock.call_args.args[0]
-    assert called_cmd == ["ollama", "run", "llama3.2", "hello [suffix]"]
+    assert called_cmd == ["ollama", "run", "llama3.2"]
+    assert run_mock.call_args.kwargs["input"] == "hello [suffix]"
 
 
 def test_run_returns_error_when_command_missing():
@@ -82,7 +83,8 @@ def test_run_async_returns_success_stdout():
     class _Proc:
         returncode = 0
 
-        async def communicate(self):
+        async def communicate(self, input=None):
+            assert input == b"hello [suffix]"
             return b"async-ok\n", b""
 
     async def _fake_exec(*args, **kwargs):
@@ -103,7 +105,8 @@ def test_run_async_returns_combined_output_on_nonzero_exit():
     class _Proc:
         returncode = 1
 
-        async def communicate(self):
+        async def communicate(self, input=None):
+            assert input == b"hello"
             return b"partial async\n", b"async fail\n"
 
     async def _fake_exec(*args, **kwargs):
@@ -138,4 +141,5 @@ def test_run_skips_suffix_when_service_flag_is_false():
 
     assert ok is True
     called_cmd = run_mock.call_args.args[0]
-    assert called_cmd == ["ollama", "run", "llama3.2", "hello"]
+    assert called_cmd == ["ollama", "run", "llama3.2"]
+    assert run_mock.call_args.kwargs["input"] == "hello"
