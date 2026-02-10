@@ -117,6 +117,10 @@ Includes:
 - `pull_commands`
 - `status` / `error`
 
+JSON output contract:
+- `schemas/list_ollama_models.schema.json`
+- Unit validation: `tests/unit/test_response_contracts.py`
+
 Example invocation and parsing:
 ```bash
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python - <<\"PY\"

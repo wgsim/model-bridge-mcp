@@ -12,6 +12,8 @@
   - runs `pytest -q tests/unit` and `pre-commit run --all-files`
 - Added typed response contract tests:
   - `tests/unit/test_response_contracts.py`
+- Added JSON Schema contract for MCP JSON output:
+  - `schemas/list_ollama_models.schema.json`
 - Added structured telemetry in failover manager:
   - logger: `model_bridge.telemetry`
   - fields: `request_id`, `routing_tier`, `latency_ms`, `status`

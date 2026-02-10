@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+from pathlib import Path
 
+import jsonschema
 from model_bridge import main as main_module
 from model_bridge.core.failover_manager import FailoverManager
 
@@ -40,16 +42,9 @@ def _config():
 def test_list_ollama_models_contract_types(monkeypatch):
     monkeypatch.setattr(main_module, "_get_installed_ollama_models", lambda: (["gpt-oss:20b"], ""))
     payload = json.loads(main_module.list_ollama_models())
+    schema = json.loads(Path("schemas/list_ollama_models.schema.json").read_text(encoding="utf-8"))
 
-    assert isinstance(payload["status"], str)
-    assert isinstance(payload["default_model"], str)
-    assert isinstance(payload["effective_default"], str)
-    assert isinstance(payload["aliases"], dict)
-    assert isinstance(payload["recommended_aliases"], list)
-    assert isinstance(payload["catalog"], list)
-    assert isinstance(payload["installed"], list)
-    assert isinstance(payload["missing"], list)
-    assert isinstance(payload.get("pull_commands", []), list)
+    jsonschema.validate(instance=payload, schema=schema)
 
 
 def test_failover_manager_emits_structured_telemetry(caplog):

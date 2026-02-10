@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://model-bridge-mcp/schemas/list_ollama_models.schema.json",
+  "title": "list_ollama_models response",
+  "type": "object",
+  "required": [
+    "status",
+    "default_model",
+    "effective_default",
+    "aliases",
+    "recommended_aliases",
+    "catalog",
+    "installed",
+    "missing"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "unavailable"]
+    },
+    "default_model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "effective_default": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aliases": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "recommended_aliases": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "catalog": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "installed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "missing": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "pull_commands": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^ollama pull\\s+.+$"
+      }
+    },
+    "error": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}
