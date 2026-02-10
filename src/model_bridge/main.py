@@ -46,8 +46,17 @@ def clean_markdown_fences(content: str) -> str:
 
 def save_to_file(content: str, path: str) -> str:
     try:
+        protected_roots = ("/etc", "/var", "/usr", "/bin", "/sbin", "/root")
+        protected_prefixes = set(protected_roots)
+        # macOS commonly resolves /etc -> /private/etc; include this alias
+        protected_prefixes.add(os.path.realpath("/etc"))
+
         full_path = os.path.abspath(os.path.expanduser(path))
-        if full_path.startswith(("/etc", "/var", "/usr", "/bin", "/sbin", "/root")):
+        resolved_path = os.path.realpath(full_path)
+        def _under_prefix(candidate: str, prefix: str) -> bool:
+            return candidate == prefix or candidate.startswith(prefix + "/")
+
+        if any(_under_prefix(resolved_path, prefix) for prefix in protected_prefixes):
             return f"[SECURITY ERROR] Writing to system path '{path}' is forbidden."
 
         os.makedirs(os.path.dirname(full_path), exist_ok=True)

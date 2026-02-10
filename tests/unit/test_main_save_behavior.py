@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from model_bridge.main import _save_if_requested
+from model_bridge.main import _save_if_requested, save_to_file
 
 
 def test_save_if_requested_saves_body_only_and_meta(tmp_path: Path):
@@ -52,3 +52,12 @@ def test_save_if_requested_masks_sensitive_text_in_meta(tmp_path: Path):
     assert "SECRET_TOKEN" not in meta_text
     assert "MY_REAL_KEY" not in meta_text
     assert "***MASKED***" in meta_text
+
+
+def test_save_to_file_blocks_symlink_path_resolving_to_system_dir(tmp_path: Path):
+    etc_link = tmp_path / "etc_link"
+    etc_link.symlink_to("/etc")
+
+    out = save_to_file("hello", str(etc_link / "shadow_copy.txt"))
+
+    assert out.startswith("[SECURITY ERROR]")
