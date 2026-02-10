@@ -117,6 +117,26 @@ Includes:
 - `pull_commands`
 - `status` / `error`
 
+Example invocation and parsing:
+```bash
+conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python - <<\"PY\"
+import json
+from model_bridge.main import list_ollama_models
+payload = json.loads(list_ollama_models())
+print(\"status:\", payload[\"status\"])
+print(\"effective_default:\", payload[\"effective_default\"])
+print(\"installed_count:\", len(payload[\"installed\"]))
+print(\"missing:\", payload[\"missing\"])
+print(\"pull_commands:\", payload.get(\"pull_commands\", []))
+PY'
+```
+
+Interpretation guide:
+- `status="ok"`: runtime `ollama list` succeeded.
+- `status="unavailable"`: local runtime inventory failed; see `error`.
+- `missing`: configured models not currently installed.
+- `pull_commands`: ready-to-run install commands for missing models.
+
 ## Security Boundaries
 - Destructive pattern blocking (`rm -rf`, `mkfs`, `dd if=`, `chmod 777`, fork bomb)
 - Sensitive system path access blocking (`/etc/`, `/var/`, `/boot/`, `/proc/`, `/root/`)

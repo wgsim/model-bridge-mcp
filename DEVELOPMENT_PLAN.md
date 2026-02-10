@@ -101,10 +101,10 @@ Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `arc
     - After install, script-based startup works in clean venv.
 
 ## Next Candidates
-- Add CI workflow (pytest + pre-commit run) for PR gate.
-- Add typed response contract tests for MCP tool outputs.
-- Add structured operational telemetry (request id, routing tier, latency).
-- Add `list_ollama_models` usage examples to client integration docs.
+- [x] Add CI workflow (pytest + pre-commit run) for PR gate.
+- [x] Add typed response contract tests for MCP tool outputs.
+- [x] Add structured operational telemetry (request id, routing tier, latency).
+- [x] Add `list_ollama_models` usage examples to client integration docs.
 
 ## Phase 2 Checklist (Security, Reliability, Testability)
 ### P0 (Start First)

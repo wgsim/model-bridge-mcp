@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import time
+import uuid
 from typing import Any, List, Protocol, Sequence
 
 from model_bridge.adapters.base import CLIAdapter
@@ -25,6 +29,7 @@ class FailoverManager:
         self.adapter = adapter
         self.sanitizer = sanitizer
         self.config = config
+        self.telemetry_logger = logging.getLogger("model_bridge.telemetry")
 
     def _format_response(self, content: str, routing: Sequence[str]) -> str:
         return f"{content}\n\n--- [Routing Log] ---\n" + "\n".join(routing)
@@ -36,6 +41,27 @@ class FailoverManager:
         self, service_name: str, args: Sequence[str], input_text: str
     ) -> tuple[bool, str]:
         return await self.adapter.run_async(service_name, args, input_text)
+
+    def _emit_telemetry(
+        self,
+        request_id: str,
+        primary: str,
+        secondary: str,
+        mode: str,
+        routing_tier: int,
+        status: str,
+        latency_ms: int,
+    ) -> None:
+        payload = {
+            "request_id": request_id,
+            "primary": primary,
+            "secondary": secondary,
+            "mode": mode,
+            "routing_tier": routing_tier,
+            "status": status,
+            "latency_ms": latency_ms,
+        }
+        self.telemetry_logger.info(json.dumps(payload, ensure_ascii=False))
 
     def execute(
         self,
@@ -66,8 +92,20 @@ class FailoverManager:
         force_primary: bool = False,
         allow_tertiary: bool = True,
     ) -> str:
+        request_id = uuid.uuid4().hex
+        start_ts = time.perf_counter()
+
         ok, sec_msg = self.sanitizer.inspect(prompt, mode=mode)
         if not ok:
+            self._emit_telemetry(
+                request_id=request_id,
+                primary=primary,
+                secondary=secondary,
+                mode=mode,
+                routing_tier=0,
+                status="security_block",
+                latency_ms=int((time.perf_counter() - start_ts) * 1000),
+            )
             return sec_msg
 
         routing_log: List[str] = []
@@ -76,10 +114,28 @@ class FailoverManager:
         success, output = await self._run_adapter(primary, [], prompt)
         if success:
             routing_log.append("    [SUCCESS]")
+            self._emit_telemetry(
+                request_id=request_id,
+                primary=primary,
+                secondary=secondary,
+                mode=mode,
+                routing_tier=1,
+                status="success",
+                latency_ms=int((time.perf_counter() - start_ts) * 1000),
+            )
             return self._format_response(output, routing_log)
 
         routing_log.append("    [FAILED]")
         if force_primary:
+            self._emit_telemetry(
+                request_id=request_id,
+                primary=primary,
+                secondary=secondary,
+                mode=mode,
+                routing_tier=1,
+                status="force_primary_failed",
+                latency_ms=int((time.perf_counter() - start_ts) * 1000),
+            )
             return self._format_error(
                 routing_log, f"Forced Primary ({primary}) failed.\nError: {output}"
             )
@@ -89,6 +145,15 @@ class FailoverManager:
         success, output = await self._run_adapter(secondary, [], failover_prompt)
         if success:
             routing_log.append("    [SUCCESS]")
+            self._emit_telemetry(
+                request_id=request_id,
+                primary=primary,
+                secondary=secondary,
+                mode=mode,
+                routing_tier=2,
+                status="success",
+                latency_ms=int((time.perf_counter() - start_ts) * 1000),
+            )
             return self._format_response(output, routing_log)
 
         routing_log.append("    [FAILED]")
@@ -99,7 +164,25 @@ class FailoverManager:
             success, output = await self._run_adapter("ollama", [backup_model], failover_prompt)
             if success:
                 routing_log.append("    [SUCCESS]")
+                self._emit_telemetry(
+                    request_id=request_id,
+                    primary=primary,
+                    secondary=secondary,
+                    mode=mode,
+                    routing_tier=3,
+                    status="success",
+                    latency_ms=int((time.perf_counter() - start_ts) * 1000),
+                )
                 return self._format_response(output, routing_log)
             routing_log.append("    [FAILED]")
 
+        self._emit_telemetry(
+            request_id=request_id,
+            primary=primary,
+            secondary=secondary,
+            mode=mode,
+            routing_tier=3 if allow_tertiary and primary != "ollama" else 2,
+            status="failed",
+            latency_ms=int((time.perf_counter() - start_ts) * 1000),
+        )
         return self._format_error(routing_log, f"All services failed. Last Error: {output}")

@@ -1,5 +1,26 @@
 # Release Notes
 
+## v0.0.3 - 2026-02-10
+
+### Summary
+- Completed all items in `DEVELOPMENT_PLAN.md` "Next Candidates".
+- Added CI gate, response contract tests, telemetry logging, and documentation examples.
+
+### Highlights
+- Added CI workflow:
+  - `.github/workflows/ci.yml`
+  - runs `pytest -q tests/unit` and `pre-commit run --all-files`
+- Added typed response contract tests:
+  - `tests/unit/test_response_contracts.py`
+- Added structured telemetry in failover manager:
+  - logger: `model_bridge.telemetry`
+  - fields: `request_id`, `routing_tier`, `latency_ms`, `status`
+- Added `list_ollama_models` usage/parsing examples in `README.md`.
+
+### Verification Snapshot
+- `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'`
+- Result: `54 passed`
+
 ## v0.0.2 - 2026-02-09
 
 ### Summary
