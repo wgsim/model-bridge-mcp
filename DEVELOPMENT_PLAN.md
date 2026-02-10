@@ -108,21 +108,21 @@ Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `arc
 
 ## Phase 2 Checklist (Security, Reliability, Testability)
 ### P0 (Start First)
-- [ ] **P0-1: Prevent prompt leakage in process args**
+- [x] **P0-1: Prevent prompt leakage in process args**
   - Change adapter execution to send prompt via `stdin` instead of argv tail.
   - Keep command signature compatibility for `codex`, `gemini`, `ollama run <model>`.
   - Verify:
     - Subprocess unit tests pass with `stdin` assertions.
     - Prompt text is not present in process argument construction path.
 
-- [ ] **P0-2: Harden file write path validation**
+- [x] **P0-2: Harden file write path validation**
   - In `save_to_file`, resolve destination using `realpath` before security path checks.
   - Reject writes resolving to protected system prefixes.
   - Verify:
     - Symlink-based bypass test fails as expected.
     - Legitimate project-local paths still save successfully.
 
-- [ ] **P0-3: Wire sanitizer rules from config**
+- [x] **P0-3: Wire sanitizer rules from config**
   - Remove hardcoded sanitizer rule sources as runtime truth.
   - Load `security.block_patterns` and `security.sensitive_paths` from validated config.
   - Verify:
@@ -130,19 +130,19 @@ Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `arc
     - Missing/invalid security fields fail with clear validation errors.
 
 ### P1 (After P0)
-- [ ] **P1-1: Add subprocess timeout controls**
+- [x] **P1-1: Add subprocess timeout controls**
   - Add configurable timeout in YAML/runtime for sync + async subprocess execution.
   - Return controlled timeout error message for failover handling.
   - Verify:
     - Timeout unit tests for sync and async paths.
 
-- [ ] **P1-2: Tighten adapter interface contract**
+- [x] **P1-2: Tighten adapter interface contract**
   - Extend `CLIAdapter` with async method contract (`run_async`).
   - Reduce `Any` usage in `FailoverManager` via protocol/type-safe interfaces.
   - Verify:
     - Type-check and unit tests pass with no behavioral change.
 
-- [ ] **P1-3: Add missing direct unit tests (high-value targets)**
+- [x] **P1-3: Add missing direct unit tests (high-value targets)**
   - Add tests for:
     - `clean_markdown_fences`
     - `_cleanup_old_meta_logs`
@@ -153,15 +153,15 @@ Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `arc
     - Added tests fail before implementation (where applicable) and pass after fix.
 
 ### P2 (Maintainability / Ops)
-- [ ] **P2-1: Improve test/dev ergonomics**
+- [x] **P2-1: Improve test/dev ergonomics**
   - Add pytest config in `pyproject.toml` (pythonpath/testpaths).
   - Expand `.gitignore` for common Python/dev artifacts.
 
-- [ ] **P2-2: Refine initialization design**
+- [x] **P2-2: Refine initialization design**
   - Move import-time global initialization to lazy-init/factory pattern.
   - Preserve MCP external behavior and tool signatures.
 
-- [ ] **P2-3: Clean legacy layout**
+- [x] **P2-3: Clean legacy layout**
   - Move legacy scripts to `archive/` or document deprecation policy clearly.
   - Keep migration traceability in README/release notes.
 
@@ -170,6 +170,12 @@ Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `arc
 - Recommended order: `P0-1 -> P0-2 -> P0-3 -> P1-* -> P2-*`
 - Validation gate for each task:
   - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'`
+- Completion status (2026-02-10):
+  - `c467465` (`stdin` prompt delivery)
+  - `fd32f93` (realpath-based write hardening)
+  - `0341a52` (config-driven sanitizer)
+  - `fdbccc0` (timeouts, type contract hardening, direct coverage, archive migration)
+  - `878371e` (plan/doc/hygiene sync)
 
 ## Done When
 - [x] `src/model_bridge/` modular structure replaces monolithic flow without tool-level behavior regression.
@@ -183,6 +189,6 @@ Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `arc
 - Preserve existing output format unless a change is explicitly documented.
 - Prefer `logging` over `print` for runtime events.
 - Configure logging handlers to `stderr` to protect MCP JSON-RPC transport on `stdout`.
-- Verification snapshot (2026-02-09):
-  - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'` -> `39 passed`
+- Verification snapshot (2026-02-10):
+  - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'` -> `52 passed`
   - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -c "from model_bridge.main import mcp; print(type(mcp).__name__)"'` -> `FastMCP`
