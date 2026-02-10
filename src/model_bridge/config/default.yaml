@@ -1,6 +1,6 @@
 commands:
   codex:
-    exec: ["codex", "exec"]
+    exec: ["codex", "exec", "--skip-git-repo-check"]
     health: ["codex", "--version"]
   gemini:
     exec: ["gemini"]
