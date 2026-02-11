@@ -8,6 +8,9 @@ commands:
   ollama:
     exec: ["ollama", "run"]
     health: ["ollama", "--version"]
+  claude_code:
+    exec: ["claude", "-p"]
+    health: ["claude", "--version"]
 
 routing:
   default_chains:
@@ -64,4 +67,4 @@ runtime:
     codex: true
     gemini: true
     ollama: false
-    claude_code: false
+    claude_code: true

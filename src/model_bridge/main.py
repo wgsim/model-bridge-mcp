@@ -130,6 +130,49 @@ def _known_providers_text() -> str:
     return "|".join(providers)
 
 
+def _get_provider_dispatchers():
+    return {
+        "codex": ask_chatgpt_cli,
+        "gemini": ask_gemini_cli,
+        "ollama": ask_ollama,
+        "claude_code": ask_claude_code,
+    }
+
+
+async def _dispatch_ask_provider(
+    provider_id: str,
+    prompt: str,
+    *,
+    save_path: str | None,
+    force_model: bool,
+    model: str,
+    options: dict,
+) -> str:
+    dispatchers = _get_provider_dispatchers()
+    handler = dispatchers.get(provider_id)
+    if handler is None:
+        raise ValueError(f"provider dispatcher not found: {provider_id}")
+    common_kwargs = {
+        "save_path": save_path,
+        "timeout_seconds": options["timeout_seconds"],
+        "max_output_tokens": options["max_output_tokens"],
+        "response_format": options["response_format"],
+        "verbosity": options["verbosity"],
+        "stream": options["stream"],
+    }
+    if provider_id == "ollama":
+        return await handler(
+            prompt,
+            model=model,
+            **common_kwargs,
+        )
+    return await handler(
+        prompt,
+        force_model=force_model,
+        **common_kwargs,
+    )
+
+
 def _normalize_ask_options(
     timeout_seconds: float | None,
     max_output_tokens: int | None,
@@ -688,7 +731,8 @@ async def ask(
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    normalized_provider = (provider or "auto").strip().lower()
+    requested_provider = (provider or "auto").strip().lower()
+    normalized_provider = "codex" if requested_provider == "auto" else requested_provider
     effective_prompt = _build_prompt_with_session(prompt, session_id)
 
     cache = _get_prompt_cache()
@@ -712,56 +756,20 @@ async def ask(
                 return _finalize_response(cached, normalized_provider, options, cached=True)
             return cached
 
-    if normalized_provider in {"auto", "codex"}:
-        raw = await ask_chatgpt_cli(
-            effective_prompt,
-            save_path=save_path,
-            force_model=force_model,
-            timeout_seconds=options["timeout_seconds"],
-            max_output_tokens=options["max_output_tokens"],
-            response_format=options["response_format"],
-            verbosity=options["verbosity"],
-            stream=options["stream"],
-        )
-    elif normalized_provider == "gemini":
-        raw = await ask_gemini_cli(
-            effective_prompt,
-            save_path=save_path,
-            force_model=force_model,
-            timeout_seconds=options["timeout_seconds"],
-            max_output_tokens=options["max_output_tokens"],
-            response_format=options["response_format"],
-            verbosity=options["verbosity"],
-            stream=options["stream"],
-        )
-    elif normalized_provider == "ollama":
-        raw = await ask_ollama(
-            effective_prompt,
-            save_path=save_path,
-            model=model,
-            timeout_seconds=options["timeout_seconds"],
-            max_output_tokens=options["max_output_tokens"],
-            response_format=options["response_format"],
-            verbosity=options["verbosity"],
-            stream=options["stream"],
-        )
-    elif normalized_provider == "claude_code":
-        raw = await ask_claude_code(
-            effective_prompt,
-            save_path=save_path,
-            force_model=force_model,
-            timeout_seconds=options["timeout_seconds"],
-            max_output_tokens=options["max_output_tokens"],
-            response_format=options["response_format"],
-            verbosity=options["verbosity"],
-            stream=options["stream"],
-        )
-    else:
+    if requested_provider != "auto" and _get_provider_registry().get(normalized_provider) is None:
         return _finalize_response(
             f"[PROVIDER ERROR] Unknown provider '{provider}'. Use: auto|{_known_providers_text()}",
             normalized_provider,
             options,
         )
+    raw = await _dispatch_ask_provider(
+        normalized_provider,
+        effective_prompt,
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        options=options,
+    )
 
     if cache is not None and cache_key is not None:
         cache.set(cache_key, raw)

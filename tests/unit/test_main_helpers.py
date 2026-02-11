@@ -91,6 +91,9 @@ def test_ask_claude_code_returns_setup_error_when_unconfigured(monkeypatch):
 
 def test_ask_unknown_provider_uses_registry_provider_list(monkeypatch):
     class _FakeRegistry:
+        def get(self, provider_id):
+            return None
+
         def list_provider_ids(self):
             return ["claude_code", "codex", "gemini", "ollama"]
 
