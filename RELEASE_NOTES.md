@@ -1,5 +1,22 @@
 # Release Notes
 
+## v0.1.2 - 2026-02-11
+
+### Summary
+- Added Phase 2 MCP-internal batch orchestration with optional parallel mode.
+
+### Highlights
+- Added new MCP tool:
+  - `ask_batch(prompts, provider, model, mode, max_concurrency, ...)`
+- Added MCP-internal execution modes:
+  - `sequential`
+  - `parallel` (bounded by `max_concurrency`)
+- Added per-job result payload:
+  - `job_id`, `status`, `duration_ms`, `content|error`
+- Added docs for batch API in `README.md`.
+- Added unit tests:
+  - `tests/unit/test_main_ask_batch.py`
+
 ## v0.1.1 - 2026-02-11
 
 ### Summary

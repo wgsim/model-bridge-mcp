@@ -1,0 +1,62 @@
+import asyncio
+
+from model_bridge import main as main_module
+
+
+class _FakeClock:
+    def __init__(self):
+        self.value = 1000.0
+
+    def __call__(self):
+        self.value += 0.01
+        return self.value
+
+
+def test_ask_batch_rejects_invalid_mode():
+    out = asyncio.run(main_module.ask_batch(prompts=["a"], mode="bad-mode"))
+    assert '"status": "error"' in out
+    assert "mode must be one of" in out
+
+
+def test_ask_batch_runs_sequential(monkeypatch):
+    calls = []
+
+    async def _fake_ask(**kwargs):
+        calls.append(kwargs["prompt"])
+        return f"ok:{kwargs['prompt']}"
+
+    monkeypatch.setattr(main_module, "ask", _fake_ask)
+    monkeypatch.setattr(main_module, "time", type("_T", (), {"perf_counter": _FakeClock()})())
+
+    out = asyncio.run(
+        main_module.ask_batch(
+            prompts=["p1", "p2"],
+            mode="sequential",
+            response_format="text",
+        )
+    )
+
+    assert calls == ["p1", "p2"]
+    assert '"ok_jobs": 2' in out
+    assert '"error_jobs": 0' in out
+
+
+def test_ask_batch_runs_parallel(monkeypatch):
+    async def _fake_ask(**kwargs):
+        await asyncio.sleep(0)
+        return f"ok:{kwargs['prompt']}"
+
+    monkeypatch.setattr(main_module, "ask", _fake_ask)
+    monkeypatch.setattr(main_module, "time", type("_T", (), {"perf_counter": _FakeClock()})())
+
+    out = asyncio.run(
+        main_module.ask_batch(
+            prompts=["a", "b", "c"],
+            mode="parallel",
+            max_concurrency=2,
+        )
+    )
+
+    assert '"mode": "parallel"' in out
+    assert '"total_jobs": 3' in out
+    assert '"ok_jobs": 3' in out

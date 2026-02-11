@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -888,6 +889,114 @@ async def ask(
         cache.set(cache_key, raw)
     _remember_session_turn(session_id, prompt, raw)
     return raw
+
+
+@mcp.tool()
+async def ask_batch(
+    prompts: list[str],
+    provider: str = "auto",
+    model: str = "default",
+    mode: str = "sequential",
+    max_concurrency: int = 3,
+    save_path: str = None,
+    force_model: bool = False,
+    timeout_seconds: float | None = None,
+    max_output_tokens: int | None = None,
+    response_format: str | None = None,
+    verbosity: str | None = None,
+    stream: bool | None = None,
+    session_id: str | None = None,
+) -> str:
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    )
+    normalized_mode = (mode or "sequential").strip().lower()
+    if normalized_mode not in {"sequential", "parallel"}:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "mode must be one of: sequential, parallel",
+            },
+            ensure_ascii=False,
+        )
+    if max_concurrency < 1:
+        return json.dumps(
+            {"status": "error", "error": "max_concurrency must be >= 1"},
+            ensure_ascii=False,
+        )
+    if not prompts:
+        return json.dumps(
+            {"status": "error", "error": "prompts must contain at least one item"},
+            ensure_ascii=False,
+        )
+
+    cleaned_prompts = [str(item).strip() for item in prompts if str(item).strip()]
+    if not cleaned_prompts:
+        return json.dumps(
+            {"status": "error", "error": "prompts must contain non-empty items"},
+            ensure_ascii=False,
+        )
+
+    async def _run_one(idx: int, prompt_text: str) -> dict:
+        job_session_id = f"{session_id}:job-{idx}" if session_id else None
+        started = time.perf_counter()
+        try:
+            content = await ask(
+                prompt=prompt_text,
+                provider=provider,
+                model=model,
+                save_path=save_path,
+                force_model=force_model,
+                timeout_seconds=options["timeout_seconds"],
+                max_output_tokens=options["max_output_tokens"],
+                response_format=options["response_format"],
+                verbosity=options["verbosity"],
+                stream=options["stream"],
+                session_id=job_session_id,
+            )
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return {
+                "job_id": idx,
+                "status": "ok",
+                "duration_ms": duration_ms,
+                "content": content,
+            }
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            return {
+                "job_id": idx,
+                "status": "error",
+                "duration_ms": duration_ms,
+                "error": str(exc),
+            }
+
+    if normalized_mode == "sequential":
+        results = []
+        for idx, prompt_text in enumerate(cleaned_prompts):
+            results.append(await _run_one(idx, prompt_text))
+    else:
+        sem = asyncio.Semaphore(max_concurrency)
+
+        async def _run_with_limit(idx: int, prompt_text: str) -> dict:
+            async with sem:
+                return await _run_one(idx, prompt_text)
+
+        tasks = [_run_with_limit(idx, prompt_text) for idx, prompt_text in enumerate(cleaned_prompts)]
+        results = await asyncio.gather(*tasks)
+
+    ok_count = sum(1 for item in results if item["status"] == "ok")
+    err_count = len(results) - ok_count
+    payload = {
+        "status": "ok",
+        "mode": normalized_mode,
+        "provider": provider,
+        "model": model,
+        "total_jobs": len(results),
+        "ok_jobs": ok_count,
+        "error_jobs": err_count,
+        "results": results,
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 @mcp.tool()

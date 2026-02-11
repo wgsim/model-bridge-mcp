@@ -85,6 +85,16 @@ Runtime behavior:
 - Optional prompt cache (TTL + max entries).
 - Optional session memory (TTL + max turns).
 
+## Batch Ask API (MCP-internal Orchestration)
+Use `ask_batch(...)` to process multiple prompts in one MCP call.
+
+- `prompts: list[str]` (required)
+- `mode: sequential|parallel` (default: `sequential`)
+- `max_concurrency` (used when `mode=parallel`)
+- Reuses existing ask options: `provider`, `model`, `force_model`, `timeout_seconds`, `response_format`, `verbosity`, `stream`, `session_id`
+
+`ask_batch` executes within MCP server orchestration, so external client parallelism is not required.
+
 ## Skill Workflows
 This repository now includes workflow-oriented skill definitions under `skills/`.
 
