@@ -34,8 +34,16 @@ class FailoverManager:
     def _format_response(self, content: str, routing: Sequence[str]) -> str:
         return f"{content}\n\n--- [Routing Log] ---\n" + "\n".join(routing)
 
-    def _format_error(self, routing: Sequence[str], msg: str) -> str:
-        return f"[Task Execution Failed]\n{msg}\n\n--- [Routing Log] ---\n" + "\n".join(routing)
+    def _format_error(
+        self, routing: Sequence[str], msg: str, why_failed: str = "", next_action: str = ""
+    ) -> str:
+        failure_meta = (
+            f"\n\n--- [Failure Metadata] ---\nwhy_failed: {why_failed}\nnext_action: {next_action}"
+        )
+        return (
+            f"[Task Execution Failed]\n{msg}{failure_meta}\n\n--- [Routing Log] ---\n"
+            + "\n".join(routing)
+        )
 
     async def _run_adapter(
         self, service_name: str, args: Sequence[str], input_text: str
@@ -142,7 +150,10 @@ class FailoverManager:
                 latency_ms=int((time.perf_counter() - start_ts) * 1000),
             )
             return self._format_error(
-                routing_log, f"Forced Primary ({primary}) failed.\nError: {output}"
+                routing_log,
+                f"Forced Primary ({primary}) failed.\nError: {output}",
+                why_failed="primary_failed_and_force_primary_enabled",
+                next_action=f"retry with force_primary=False or inspect {primary} availability",
             )
 
         failover_prompt = f"[Context: {primary} failed] {prompt}"
@@ -193,4 +204,9 @@ class FailoverManager:
             error_category="all_services_failed",
             latency_ms=int((time.perf_counter() - start_ts) * 1000),
         )
-        return self._format_error(routing_log, f"All services failed. Last Error: {output}")
+        return self._format_error(
+            routing_log,
+            f"All services failed. Last Error: {output}",
+            why_failed="all_services_failed",
+            next_action="verify cli health checks and retry",
+        )

@@ -192,3 +192,6 @@ Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `arc
 - Verification snapshot (2026-02-10):
   - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit'` -> `52 passed`
   - `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -c "from model_bridge.main import mcp; print(type(mcp).__name__)"'` -> `FastMCP`
+
+## Phase 3 Plan
+- Implementation plan: `docs/plans/2026-02-10-phase3-ask-ux-efficiency-plan.md`

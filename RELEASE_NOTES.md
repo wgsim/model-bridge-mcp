@@ -1,5 +1,36 @@
 # Release Notes
 
+## v0.0.4 - 2026-02-10
+
+### Summary
+- Implemented Phase 3 ask UX/efficiency core features.
+
+### Highlights
+- Added standardized ask options to `ask_chatgpt_cli`, `ask_gemini_cli`, `ask_ollama`:
+  - `timeout_seconds`, `max_output_tokens`, `response_format`, `verbosity`, `stream`
+- Added unified tool:
+  - `ask(prompt, provider, model, ..., session_id)`
+- Added lightweight auto routing for `ask_ollama(model="auto")`.
+- Added in-memory prompt cache and session memory modules:
+  - `src/model_bridge/core/prompt_cache.py`
+  - `src/model_bridge/core/session_memory.py`
+- Added failure metadata block in failover errors:
+  - `--- [Failure Metadata] ---`
+  - `why_failed`, `next_action`
+
+### Tests Added
+- `tests/unit/test_main_ask_options.py`
+- `tests/unit/test_auto_routing_policy.py`
+- `tests/unit/test_prompt_cache.py`
+- `tests/unit/test_session_memory.py`
+- `tests/unit/test_failover_failure_metadata.py`
+- `tests/integration/test_ask_unified_tool.py`
+- `tests/integration/test_streaming_mode.py`
+
+### Verification Snapshot
+- `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests'`
+- Result: `73 passed`
+
 ## v0.0.3 - 2026-02-10
 
 ### Summary

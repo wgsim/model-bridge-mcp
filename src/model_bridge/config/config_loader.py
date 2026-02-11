@@ -85,11 +85,38 @@ class RuntimeApplySystemSuffix(BaseModel):
     ollama: bool
 
 
+class AskDefaultsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    timeout_seconds: float = Field(default=120.0, gt=0)
+    max_output_tokens: int = Field(default=0, ge=0)
+    response_format: str = Field(default="text")
+    verbosity: str = Field(default="normal")
+    stream: bool = False
+
+    @model_validator(mode="after")
+    def validate_enums(self) -> "AskDefaultsConfig":
+        if self.response_format not in {"text", "json"}:
+            raise ValueError("runtime.ask_defaults.response_format must be one of: text, json")
+        if self.verbosity not in {"brief", "normal", "detailed"}:
+            raise ValueError(
+                "runtime.ask_defaults.verbosity must be one of: brief, normal, detailed"
+            )
+        return self
+
+
 class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     system_suffix: str
     apply_system_suffix: RuntimeApplySystemSuffix
     subprocess_timeout_seconds: float = Field(default=120.0, gt=0)
+    ask_defaults: AskDefaultsConfig = Field(default_factory=AskDefaultsConfig)
+    prompt_cache_enabled: bool = True
+    prompt_cache_ttl_seconds: int = Field(default=300, ge=1)
+    prompt_cache_max_entries: int = Field(default=256, ge=1)
+    session_memory_enabled: bool = False
+    session_memory_ttl_seconds: int = Field(default=1800, ge=1)
+    session_memory_max_turns: int = Field(default=6, ge=1)
+    auto_routing_short_prompt_threshold: int = Field(default=120, ge=1)
 
 
 class AppConfig(BaseModel):

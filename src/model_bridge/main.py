@@ -9,6 +9,7 @@ import time
 import json
 import shutil
 import subprocess
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -17,6 +18,8 @@ from mcp.server.fastmcp import FastMCP
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
 from model_bridge.config.config_loader import load_config
 from model_bridge.core.failover_manager import FailoverManager
+from model_bridge.core.prompt_cache import PromptCache
+from model_bridge.core.session_memory import SessionMemory
 from model_bridge.security.sanitizer import SecuritySanitizer
 
 
@@ -30,6 +33,8 @@ mcp = FastMCP("Model Bridge MCP")
 CONFIG: Optional[dict] = None
 ADAPTER: Optional[SubprocessAdapter] = None
 FAILOVER: Optional[FailoverManager] = None
+PROMPT_CACHE: Optional[PromptCache] = None
+SESSION_MEMORY: Optional[SessionMemory] = None
 
 
 def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
@@ -73,6 +78,155 @@ def _get_failover() -> FailoverManager:
     _ensure_runtime()
     assert FAILOVER is not None
     return FAILOVER
+
+
+def _get_runtime_defaults() -> dict:
+    runtime_cfg = _get_config().get("runtime", {})
+    return runtime_cfg.get("ask_defaults", {})
+
+
+def _get_prompt_cache() -> Optional[PromptCache]:
+    global PROMPT_CACHE
+    runtime_cfg = _get_config().get("runtime", {})
+    if not runtime_cfg.get("prompt_cache_enabled", True):
+        return None
+    if PROMPT_CACHE is None:
+        PROMPT_CACHE = PromptCache(
+            ttl_seconds=runtime_cfg.get("prompt_cache_ttl_seconds", 300),
+            max_entries=runtime_cfg.get("prompt_cache_max_entries", 256),
+        )
+    return PROMPT_CACHE
+
+
+def _get_session_memory() -> Optional[SessionMemory]:
+    global SESSION_MEMORY
+    runtime_cfg = _get_config().get("runtime", {})
+    if not runtime_cfg.get("session_memory_enabled", False):
+        return None
+    if SESSION_MEMORY is None:
+        SESSION_MEMORY = SessionMemory(
+            ttl_seconds=runtime_cfg.get("session_memory_ttl_seconds", 1800),
+            max_turns=runtime_cfg.get("session_memory_max_turns", 6),
+        )
+    return SESSION_MEMORY
+
+
+def _normalize_ask_options(
+    timeout_seconds: float | None,
+    max_output_tokens: int | None,
+    response_format: str | None,
+    verbosity: str | None,
+    stream: bool | None,
+) -> dict:
+    defaults = _get_runtime_defaults()
+    resolved = {
+        "timeout_seconds": timeout_seconds
+        if timeout_seconds is not None
+        else defaults.get("timeout_seconds", 120.0),
+        "max_output_tokens": max_output_tokens
+        if max_output_tokens is not None
+        else defaults.get("max_output_tokens", 0),
+        "response_format": (response_format or defaults.get("response_format", "text")).strip(),
+        "verbosity": (verbosity or defaults.get("verbosity", "normal")).strip(),
+        "stream": stream if stream is not None else defaults.get("stream", False),
+    }
+    if resolved["response_format"] not in {"text", "json"}:
+        raise ValueError("response_format must be one of: text, json")
+    if resolved["verbosity"] not in {"brief", "normal", "detailed"}:
+        raise ValueError("verbosity must be one of: brief, normal, detailed")
+    if resolved["timeout_seconds"] <= 0:
+        raise ValueError("timeout_seconds must be > 0")
+    if resolved["max_output_tokens"] < 0:
+        raise ValueError("max_output_tokens must be >= 0")
+    return resolved
+
+
+@contextmanager
+def _temporary_timeout(timeout_seconds: float):
+    adapter = _get_adapter()
+    if not hasattr(adapter, "timeout_seconds"):
+        yield
+        return
+    original = adapter.timeout_seconds
+    adapter.timeout_seconds = timeout_seconds
+    try:
+        yield
+    finally:
+        adapter.timeout_seconds = original
+
+
+def _apply_verbosity(text: str, verbosity: str) -> str:
+    if verbosity == "brief":
+        return text[:600].rstrip()
+    return text
+
+
+def _apply_max_output_tokens(text: str, max_output_tokens: int) -> str:
+    if max_output_tokens <= 0:
+        return text
+    tokens = text.split()
+    if len(tokens) <= max_output_tokens:
+        return text
+    return " ".join(tokens[:max_output_tokens])
+
+
+def _format_stream_fallback(text: str) -> str:
+    chunks = [text[i : i + 200] for i in range(0, len(text), 200)] or [""]
+    return "[STREAM FALLBACK]\n" + "\n".join(chunks) + "\n[STREAM END]"
+
+
+def _finalize_response(response: str, provider: str, options: dict, cached: bool = False) -> str:
+    body = _apply_verbosity(response, options["verbosity"])
+    body = _apply_max_output_tokens(body, options["max_output_tokens"])
+    if options["stream"] and options["response_format"] == "text":
+        body = _format_stream_fallback(body)
+    if options["response_format"] == "json":
+        payload = {
+            "provider": provider,
+            "cached": cached,
+            "content": body,
+            "meta": {
+                "verbosity": options["verbosity"],
+                "max_output_tokens": options["max_output_tokens"],
+                "stream": bool(options["stream"]),
+            },
+        }
+        return json.dumps(payload, ensure_ascii=False)
+    return body
+
+
+def _select_auto_ollama_alias(prompt: str) -> str:
+    runtime_cfg = _get_config().get("runtime", {})
+    short_threshold = runtime_cfg.get("auto_routing_short_prompt_threshold", 120)
+    low = prompt.lower()
+    if any(token in low for token in ("def ", "class ", "function", "python", "code", "bug", "stacktrace")):
+        return "coder"
+    if len(prompt.strip()) <= short_threshold:
+        return "fast"
+    return "default"
+
+
+def _build_prompt_with_session(prompt: str, session_id: str | None) -> str:
+    if not session_id:
+        return prompt
+    memory = _get_session_memory()
+    if memory is None:
+        return prompt
+    history = memory.get_context(session_id)
+    if not history:
+        return prompt
+    context = "\n".join(f"- {item}" for item in history)
+    return f"[Session Context]\n{context}\n\n[User Prompt]\n{prompt}"
+
+
+def _remember_session_turn(session_id: str | None, prompt: str, response: str) -> None:
+    if not session_id:
+        return
+    memory = _get_session_memory()
+    if memory is None:
+        return
+    summary = f"Q: {prompt[:120]} | A: {response[:120]}"
+    memory.append_turn(session_id, summary)
 
 
 def clean_markdown_fences(content: str) -> str:
@@ -276,31 +430,73 @@ def _get_installed_ollama_models() -> tuple[list[str], str]:
 
 
 @mcp.tool()
-async def ask_chatgpt_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
-    response = await _get_failover().execute_async(
-        "codex", "gemini", prompt, "execution", force_primary=force_model
+async def ask_chatgpt_cli(
+    prompt: str,
+    save_path: str = None,
+    force_model: bool = False,
+    timeout_seconds: float | None = None,
+    max_output_tokens: int | None = None,
+    response_format: str | None = None,
+    verbosity: str | None = None,
+    stream: bool | None = None,
+) -> str:
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    return _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
+    with _temporary_timeout(options["timeout_seconds"]):
+        response = await _get_failover().execute_async(
+            "codex", "gemini", prompt, "execution", force_primary=force_model
+        )
+    response = _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
+    return _finalize_response(response, "codex", options)
 
 
 @mcp.tool()
-async def ask_gemini_cli(prompt: str, save_path: str = None, force_model: bool = False) -> str:
-    response = await _get_failover().execute_async(
-        "gemini", "codex", prompt, "analysis", force_primary=force_model
+async def ask_gemini_cli(
+    prompt: str,
+    save_path: str = None,
+    force_model: bool = False,
+    timeout_seconds: float | None = None,
+    max_output_tokens: int | None = None,
+    response_format: str | None = None,
+    verbosity: str | None = None,
+    stream: bool | None = None,
+) -> str:
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    return _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
+    with _temporary_timeout(options["timeout_seconds"]):
+        response = await _get_failover().execute_async(
+            "gemini", "codex", prompt, "analysis", force_primary=force_model
+        )
+    response = _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
+    return _finalize_response(response, "gemini", options)
 
 
 @mcp.tool()
-async def ask_ollama(prompt: str, save_path: str = None, model: str = "default") -> str:
+async def ask_ollama(
+    prompt: str,
+    save_path: str = None,
+    model: str = "default",
+    timeout_seconds: float | None = None,
+    max_output_tokens: int | None = None,
+    response_format: str | None = None,
+    verbosity: str | None = None,
+    stream: bool | None = None,
+) -> str:
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    )
     is_safe, sec_msg = SecuritySanitizer.inspect(prompt, mode="execution")
     if not is_safe:
-        return sec_msg
+        return _finalize_response(sec_msg, "ollama", options)
 
     requested_token = (model or "").strip() or "default"
+    if requested_token == "auto":
+        requested_token = _select_auto_ollama_alias(prompt)
     resolved_model, model_error = _resolve_ollama_model(requested_token)
     if resolved_model is None:
-        return model_error
+        return _finalize_response(model_error, "ollama", options)
 
     installed_models_raw, installed_error = _get_installed_ollama_models()
     installed_normalized = {_normalize_model_name(name) for name in installed_models_raw}
@@ -310,39 +506,129 @@ async def ask_ollama(prompt: str, save_path: str = None, model: str = "default")
         requested_installed = _normalize_model_name(resolved_model) in installed_normalized
         if not requested_installed and requested_token != "default":
             pull_cmd = f"ollama pull {resolved_model}"
-            return (
+            return _finalize_response(
                 f"[MODEL ERROR] Requested model '{resolved_model}' is not installed locally. "
-                f"Install with: {pull_cmd}"
+                f"Install with: {pull_cmd}",
+                "ollama",
+                options,
             )
         local_chain = [m for m in local_chain if _normalize_model_name(m) in installed_normalized]
         if not local_chain:
             pull_cmd = f"ollama pull {resolved_model}"
-            return (
+            return _finalize_response(
                 f"[MODEL ERROR] Requested model '{resolved_model}' is not installed locally. "
-                f"Install with: {pull_cmd}"
+                f"Install with: {pull_cmd}",
+                "ollama",
+                options,
             )
 
     last_local_error = ""
-    for local_model in local_chain:
-        success, output = await _get_adapter().run_async("ollama", [local_model], prompt)
-        if success:
-            response = f"[Source: Ollama]\n{output}"
-            return _save_if_requested(response, save_path, tool_name="ask_ollama")
-        last_local_error = output
+    with _temporary_timeout(options["timeout_seconds"]):
+        for local_model in local_chain:
+            success, output = await _get_adapter().run_async("ollama", [local_model], prompt)
+            if success:
+                response = f"[Source: Ollama]\n{output}"
+                response = _save_if_requested(response, save_path, tool_name="ask_ollama")
+                return _finalize_response(response, "ollama", options)
+            last_local_error = output
 
     logger.warning("Ollama unreachable. Failing over to cloud chain.")
     cloud_prompt = f"[WARNING: Local Ollama failed. Executing via Cloud Backup] {prompt}"
     if last_local_error:
         cloud_prompt = f"{cloud_prompt}\n\n[Local Error Summary]\n{last_local_error}"
-    response = await _get_failover().execute_async(
-        "codex",
-        "gemini",
-        cloud_prompt,
-        "execution",
-        force_primary=False,
-        allow_tertiary=False,
+    with _temporary_timeout(options["timeout_seconds"]):
+        response = await _get_failover().execute_async(
+            "codex",
+            "gemini",
+            cloud_prompt,
+            "execution",
+            force_primary=False,
+            allow_tertiary=False,
+        )
+    response = _save_if_requested(response, save_path, tool_name="ask_ollama")
+    return _finalize_response(response, "ollama", options)
+
+
+@mcp.tool()
+async def ask(
+    prompt: str,
+    provider: str = "auto",
+    model: str = "default",
+    save_path: str = None,
+    force_model: bool = False,
+    timeout_seconds: float | None = None,
+    max_output_tokens: int | None = None,
+    response_format: str | None = None,
+    verbosity: str | None = None,
+    stream: bool | None = None,
+    session_id: str | None = None,
+) -> str:
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    return _save_if_requested(response, save_path, tool_name="ask_ollama")
+    normalized_provider = (provider or "auto").strip().lower()
+    effective_prompt = _build_prompt_with_session(prompt, session_id)
+
+    cache = _get_prompt_cache()
+    cache_key = None
+    if cache is not None:
+        cache_key = PromptCache.build_key(
+            {
+                "provider": normalized_provider,
+                "model": model,
+                "prompt": effective_prompt,
+                "force_model": force_model,
+                "options": json.dumps(options, sort_keys=True),
+            }
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return _finalize_response(cached, normalized_provider, options, cached=True)
+
+    if normalized_provider in {"auto", "codex"}:
+        raw = await ask_chatgpt_cli(
+            effective_prompt,
+            save_path=save_path,
+            force_model=force_model,
+            timeout_seconds=options["timeout_seconds"],
+            max_output_tokens=options["max_output_tokens"],
+            response_format=options["response_format"],
+            verbosity=options["verbosity"],
+            stream=options["stream"],
+        )
+    elif normalized_provider == "gemini":
+        raw = await ask_gemini_cli(
+            effective_prompt,
+            save_path=save_path,
+            force_model=force_model,
+            timeout_seconds=options["timeout_seconds"],
+            max_output_tokens=options["max_output_tokens"],
+            response_format=options["response_format"],
+            verbosity=options["verbosity"],
+            stream=options["stream"],
+        )
+    elif normalized_provider == "ollama":
+        raw = await ask_ollama(
+            effective_prompt,
+            save_path=save_path,
+            model=model,
+            timeout_seconds=options["timeout_seconds"],
+            max_output_tokens=options["max_output_tokens"],
+            response_format=options["response_format"],
+            verbosity=options["verbosity"],
+            stream=options["stream"],
+        )
+    else:
+        return _finalize_response(
+            f"[PROVIDER ERROR] Unknown provider '{provider}'. Use: auto|codex|gemini|ollama",
+            normalized_provider,
+            options,
+        )
+
+    if cache is not None and cache_key is not None:
+        cache.set(cache_key, raw)
+    _remember_session_turn(session_id, prompt, raw)
+    return raw
 
 
 @mcp.tool()

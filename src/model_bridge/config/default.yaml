@@ -47,6 +47,19 @@ security:
 runtime:
   system_suffix: "\n\n[SYSTEM INSTRUCTION: Return raw code/text only. Do NOT use emojis. Do NOT use markdown code blocks.]"
   subprocess_timeout_seconds: 120
+  ask_defaults:
+    timeout_seconds: 120
+    max_output_tokens: 0
+    response_format: "text"
+    verbosity: "normal"
+    stream: false
+  prompt_cache_enabled: true
+  prompt_cache_ttl_seconds: 300
+  prompt_cache_max_entries: 256
+  session_memory_enabled: false
+  session_memory_ttl_seconds: 1800
+  session_memory_max_turns: 6
+  auto_routing_short_prompt_threshold: 120
   apply_system_suffix:
     codex: true
     gemini: true

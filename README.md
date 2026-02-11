@@ -64,6 +64,22 @@ Behavior:
 - If requested model is not installed, it returns:
   - `[MODEL ERROR] ... Install with: ollama pull <model>`
 - For `model="default"`, local fallback chain (`models.ollama_local_fallback_chain`) is attempted before cloud fallback.
+- For `model="auto"`, alias is selected by lightweight prompt heuristic (`fast`/`coder`/`default`).
+
+## Unified Ask API
+You can use the new unified tool:
+- `ask(prompt, provider="auto|codex|gemini|ollama", model="default|auto|...")`
+- Common options across ask tools:
+  - `timeout_seconds`
+  - `max_output_tokens`
+  - `response_format` (`text`/`json`)
+  - `verbosity` (`brief`/`normal`/`detailed`)
+  - `stream` (fallback chunk mode)
+  - `session_id` (for optional session continuity)
+
+Runtime behavior:
+- Optional prompt cache (TTL + max entries).
+- Optional session memory (TTL + max turns).
 
 ## Health Check Example
 The current operational health check verifies CLI availability from config.
