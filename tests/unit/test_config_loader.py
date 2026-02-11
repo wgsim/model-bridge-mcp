@@ -18,6 +18,7 @@ def test_load_config_from_default_succeeds():
     assert "security" in config
     assert "runtime" in config
     assert config["runtime"]["apply_system_suffix"]["ollama"] is False
+    assert config["runtime"]["ollama_timeout_seconds"] > 0
     assert "ollama_catalog" in config["models"]
     assert "ollama_aliases" in config["models"]
     assert "ollama_local_fallback_chain" in config["models"]

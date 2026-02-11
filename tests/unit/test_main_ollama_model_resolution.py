@@ -112,3 +112,36 @@ def test_ask_ollama_returns_security_block_before_adapter_call(monkeypatch):
 
     result = asyncio.run(main_module.ask_ollama("blocked prompt", model="default"))
     assert result == "[SECURITY BLOCK] blocked"
+
+
+def test_ask_ollama_uses_runtime_ollama_timeout_by_default(monkeypatch):
+    captured = {"timeout": None}
+
+    async def _fake_run_async(service_name, args, input_text, timeout_seconds=None):
+        captured["timeout"] = timeout_seconds
+        return True, "ok"
+
+    class _Adapter:
+        async def run_async(self, service_name, args, input_text, timeout_seconds=None):
+            return await _fake_run_async(
+                service_name, args, input_text, timeout_seconds=timeout_seconds
+            )
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: _Adapter())
+    monkeypatch.setattr(main_module, "_get_installed_ollama_models", lambda: (["gpt-oss:20b"], ""))
+    monkeypatch.setattr(
+        main_module,
+        "_get_config",
+        lambda: {
+            "models": {
+                "ollama_catalog": ["gpt-oss:20b", "qwen3-coder-next:Q4_K_M"],
+                "ollama_aliases": {"default": "gpt-oss:20b", "coder": "qwen3-coder-next:Q4_K_M"},
+                "ollama_local_fallback_chain": ["default", "coder"],
+            },
+            "runtime": {"ollama_timeout_seconds": 333},
+        },
+    )
+
+    result = asyncio.run(main_module.ask_ollama("hello", model="default"))
+    assert result.startswith("[Source: Ollama]")
+    assert captured["timeout"] == 333

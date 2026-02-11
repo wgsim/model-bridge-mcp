@@ -614,8 +614,12 @@ async def ask_ollama(
     verbosity: str | None = None,
     stream: bool | None = None,
 ) -> str:
+    effective_timeout = timeout_seconds
+    if effective_timeout is None:
+        runtime_cfg = _get_config().get("runtime", {})
+        effective_timeout = runtime_cfg.get("ollama_timeout_seconds")
     options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+        effective_timeout, max_output_tokens, response_format, verbosity, stream
     )
     is_safe, sec_msg = SecuritySanitizer.inspect(prompt, mode="execution")
     if not is_safe:

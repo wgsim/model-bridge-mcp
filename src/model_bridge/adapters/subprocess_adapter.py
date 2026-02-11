@@ -44,6 +44,42 @@ class SubprocessAdapter(CLIAdapter):
         full_cmd = cmd_base + list(args)
         return True, "", full_cmd, full_input
 
+    @staticmethod
+    def _provider_timeout_hint(service_name: str, details: str) -> str:
+        low = details.lower()
+        if "authorization code" in low or "visit the following url" in low:
+            return (
+                "Hint: The CLI is waiting for interactive OAuth login. "
+                "Complete auth once in a real TTY shell, then retry."
+            )
+        if "raw mode is not supported" in low:
+            return (
+                "Hint: This CLI requires TTY/raw mode and may fail in non-interactive subprocess calls."
+            )
+        if service_name in {"gemini", "claude_code"}:
+            return (
+                "Hint: This provider may require interactive login/TTY initialization before non-interactive use."
+            )
+        return ""
+
+    @classmethod
+    def _format_timeout_error(
+        cls, service_name: str, timeout_seconds: float | None, details: str = ""
+    ) -> str:
+        timeout_label = f"{timeout_seconds}" if timeout_seconds is not None else "unknown"
+        base = f"Timeout Error: Command '{service_name}' exceeded {timeout_label}s"
+        trimmed = details.strip()
+        parts = [base]
+        if trimmed:
+            snippet = " ".join(trimmed.split())
+            if len(snippet) > 240:
+                snippet = snippet[:240].rstrip() + "..."
+            parts.append(f"partial_output={snippet}")
+        hint = cls._provider_timeout_hint(service_name, trimmed)
+        if hint:
+            parts.append(hint)
+        return " | ".join(parts)
+
     def run(
         self,
         service_name: str,
@@ -65,8 +101,14 @@ class SubprocessAdapter(CLIAdapter):
                 check=False,
                 timeout=effective_timeout,
             )
-        except subprocess.TimeoutExpired:
-            return False, f"Timeout Error: Command '{service_name}' exceeded {effective_timeout}s"
+        except subprocess.TimeoutExpired as exc:
+            details = ""
+            if exc.stdout:
+                details += exc.stdout if isinstance(exc.stdout, str) else exc.stdout.decode("utf-8", errors="replace")
+            if exc.stderr:
+                details += exc.stderr if isinstance(exc.stderr, str) else exc.stderr.decode("utf-8", errors="replace")
+            timeout_value = effective_timeout if effective_timeout is not None else getattr(exc, "timeout", None)
+            return False, self._format_timeout_error(service_name, timeout_value, details)
         except Exception as exc:
             return False, str(exc)
 
@@ -102,8 +144,11 @@ class SubprocessAdapter(CLIAdapter):
                 )
         except asyncio.TimeoutError:
             proc.kill()
-            await proc.wait()
-            return False, f"Timeout Error: Command '{service_name}' exceeded {effective_timeout}s"
+            stdout_bytes, stderr_bytes = await proc.communicate()
+            details = stdout_bytes.decode("utf-8", errors="replace") + stderr_bytes.decode(
+                "utf-8", errors="replace"
+            )
+            return False, self._format_timeout_error(service_name, effective_timeout, details)
         except Exception as exc:
             return False, str(exc)
 

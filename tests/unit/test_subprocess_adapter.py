@@ -154,7 +154,7 @@ def test_run_returns_timeout_error_when_subprocess_hangs():
         ok, output = adapter.run("ollama", ["llama3.2"], "hello")
 
     assert ok is False
-    assert output == "Timeout Error: Command 'ollama' exceeded 3.0s"
+    assert output.startswith("Timeout Error: Command 'ollama' exceeded 3.0s")
 
 
 def test_run_async_returns_timeout_error_when_subprocess_hangs():
@@ -191,6 +191,22 @@ def test_run_async_returns_timeout_error_when_subprocess_hangs():
         ok, output = asyncio.run(adapter.run_async("ollama", ["llama3.2"], "hello"))
 
     assert ok is False
-    assert output == "Timeout Error: Command 'ollama' exceeded 2.0s"
+    assert output.startswith("Timeout Error: Command 'ollama' exceeded 2.0s")
     assert proc.killed is True
-    assert proc.waited is True
+
+
+def test_timeout_error_includes_interactive_auth_hint_for_gemini():
+    adapter = SubprocessAdapter({"gemini": {"exec": ["gemini"], "health": ["gemini", "--version"]}})
+    timeout_exc = subprocess.TimeoutExpired(
+        cmd=["gemini"],
+        timeout=4.0,
+        output="Please visit the following URL to authorize the application",
+    )
+    with patch("shutil.which", return_value="/usr/bin/gemini"), patch(
+        "subprocess.run", side_effect=timeout_exc
+    ):
+        ok, output = adapter.run("gemini", [], "hello")
+
+    assert ok is False
+    assert "Timeout Error: Command 'gemini' exceeded 4.0s" in output
+    assert "interactive OAuth login" in output

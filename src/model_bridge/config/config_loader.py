@@ -111,6 +111,7 @@ class RuntimeConfig(BaseModel):
     system_suffix: str
     apply_system_suffix: RuntimeApplySystemSuffix
     subprocess_timeout_seconds: float = Field(default=120.0, gt=0)
+    ollama_timeout_seconds: float = Field(default=300.0, gt=0)
     ask_defaults: AskDefaultsConfig = Field(default_factory=AskDefaultsConfig)
     prompt_cache_enabled: bool = True
     prompt_cache_ttl_seconds: int = Field(default=300, ge=1)
