@@ -212,6 +212,22 @@ def test_timeout_error_includes_interactive_auth_hint_for_gemini():
     assert "interactive OAuth login" in output
 
 
+def test_timeout_error_includes_workspace_trust_hint():
+    adapter = SubprocessAdapter({"gemini": {"exec": ["gemini"], "health": ["gemini", "--version"]}})
+    timeout_exc = subprocess.TimeoutExpired(
+        cmd=["gemini"],
+        timeout=4.0,
+        output="Please trust this folder to continue",
+    )
+    with patch("shutil.which", return_value="/usr/bin/gemini"), patch(
+        "subprocess.run", side_effect=timeout_exc
+    ):
+        ok, output = adapter.run("gemini", [], "hello")
+
+    assert ok is False
+    assert "workspace trust confirmation" in output
+
+
 def test_run_passes_prompt_as_argument_for_gemini_p_mode():
     adapter = SubprocessAdapter(
         {"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}},

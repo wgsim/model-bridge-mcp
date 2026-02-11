@@ -230,6 +230,20 @@ Use `list_runtime_resources(model=\"default\", requested_max_concurrency=1)` to 
   - `vram_total_gb`, `vram_free_gb`, `vram_detector`
   - `ollama_recommendation.applied_max_concurrency`
 
+## CLI Startup Prompt Policy Tool
+Use `list_cli_noninteractive_policy()` to inspect startup/trust prompt handling for each provider.
+
+- `codex`
+  - non-interactive path: `codex exec`
+  - skip flag: `--skip-git-repo-check` (recommended in config)
+- `gemini`
+  - non-interactive path: `gemini -p`
+  - no documented workspace-trust skip flag in current CLI help output
+  - if stalled, complete one-time trust/auth in interactive mode
+- `claude_code`
+  - non-interactive path: `claude -p`
+  - CLI help indicates workspace trust dialog is skipped in `-p` mode
+
 Telemetry note:
 - `model_bridge.telemetry` logs structured events to stderr.
 - Current fields include `request_id`, `routing_tier`, `status`, `error_category`, and `latency_ms`.

@@ -60,6 +60,11 @@ class SubprocessAdapter(CLIAdapter):
     @staticmethod
     def _provider_timeout_hint(service_name: str, details: str) -> str:
         low = details.lower()
+        if "trust this folder" in low or "trusted folder" in low or "workspace trust" in low:
+            return (
+                "Hint: The CLI is waiting for one-time workspace trust confirmation. "
+                "Run the provider once in interactive mode in this directory and accept trust."
+            )
         if "authorization code" in low or "visit the following url" in low:
             return (
                 "Hint: The CLI is waiting for interactive OAuth login. "

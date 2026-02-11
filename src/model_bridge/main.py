@@ -1217,6 +1217,38 @@ def list_orchestrator_capabilities() -> str:
 
 
 @mcp.tool()
+def list_cli_noninteractive_policy() -> str:
+    commands_cfg = _get_config().get("commands", {})
+    codex_exec = commands_cfg.get("codex", {}).get("exec", [])
+    gemini_exec = commands_cfg.get("gemini", {}).get("exec", [])
+    claude_exec = commands_cfg.get("claude_code", {}).get("exec", [])
+    payload = {
+        "status": "ok",
+        "providers": {
+            "codex": {
+                "configured_exec": codex_exec,
+                "noninteractive_mode": "codex exec",
+                "skip_trust_like_prompt_flag": "--skip-git-repo-check",
+                "skip_flag_configured": "--skip-git-repo-check" in codex_exec,
+            },
+            "gemini": {
+                "configured_exec": gemini_exec,
+                "noninteractive_mode": "gemini -p/--prompt",
+                "documented_workspace_trust_skip_flag": None,
+                "note": "Complete one-time trust/auth interactively if non-interactive calls stall.",
+            },
+            "claude_code": {
+                "configured_exec": claude_exec,
+                "noninteractive_mode": "claude -p/--print",
+                "workspace_trust_prompt_skipped_in_print_mode": "-p" in claude_exec
+                or "--print" in claude_exec,
+            },
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+@mcp.tool()
 def list_runtime_resources(model: str = "default", requested_max_concurrency: int = 1) -> str:
     ollama_meta = _compute_ollama_batch_concurrency(model, requested_max_concurrency)
     payload = {
