@@ -85,6 +85,19 @@ Runtime behavior:
 - Optional prompt cache (TTL + max entries).
 - Optional session memory (TTL + max turns).
 
+## Skill Workflows
+This repository now includes workflow-oriented skill definitions under `skills/`.
+
+- `ask-general-workflow`
+- `ask-review-workflow`
+- `ask-code-writing-workflow`
+- `ask-strict-json-workflow`
+- `ask-batch-workflow`
+- `ask-provider-routing-workflow`
+
+Routing/trigger policy is documented in:
+- `docs/skills/skill-routing-spec.md`
+
 ## Health Check Example
 The current operational health check verifies CLI availability from config.
 

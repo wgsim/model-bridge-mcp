@@ -1,5 +1,24 @@
 # Release Notes
 
+## v0.1.1 - 2026-02-11
+
+### Summary
+- Added Phase 1 skill workflow design assets without parallel execution changes.
+
+### Highlights
+- Added workflow skill definitions:
+  - `skills/ask-general-workflow/SKILL.md`
+  - `skills/ask-review-workflow/SKILL.md`
+  - `skills/ask-code-writing-workflow/SKILL.md`
+  - `skills/ask-strict-json-workflow/SKILL.md`
+  - `skills/ask-batch-workflow/SKILL.md`
+  - `skills/ask-provider-routing-workflow/SKILL.md`
+- Added skill routing specification:
+  - `docs/skills/skill-routing-spec.md`
+- Added skill index:
+  - `skills/README.md`
+- Updated README with Skill Workflows section.
+
 ## v0.0.4 - 2026-02-10
 
 ### Summary
