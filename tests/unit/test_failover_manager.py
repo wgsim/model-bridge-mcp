@@ -169,3 +169,32 @@ def test_execute_async_uses_async_adapter_path():
 
     assert "async-primary-ok" in out
     assert len(adapter.calls) == 1
+
+
+def test_execute_async_passes_provider_specific_args():
+    adapter = _FakeAdapter(
+        {
+            ("codex", ("--model", "gpt-5")): (False, "primary-fail"),
+            ("gemini", ("--model", "gemini-2.5-pro")): (True, "secondary-ok"),
+        }
+    )
+    manager = FailoverManager(adapter=adapter, sanitizer=_AllowAllSanitizer(), config=_base_config())
+
+    out = asyncio.run(
+        manager.execute_async(
+            "codex",
+            "gemini",
+            "hello",
+            mode="execution",
+            allow_tertiary=False,
+            provider_args={
+                "codex": ["--model", "gpt-5"],
+                "gemini": ["--model", "gemini-2.5-pro"],
+            },
+        )
+    )
+
+    assert "secondary-ok" in out
+    assert adapter.calls[0] == ("codex", ["--model", "gpt-5"], "hello")
+    assert adapter.calls[1][0] == "gemini"
+    assert adapter.calls[1][1] == ["--model", "gemini-2.5-pro"]

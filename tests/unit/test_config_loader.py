@@ -22,6 +22,9 @@ def test_load_config_from_default_succeeds():
     assert "ollama_catalog" in config["models"]
     assert "ollama_aliases" in config["models"]
     assert "ollama_local_fallback_chain" in config["models"]
+    assert "codex_model_catalog" in config["models"]
+    assert "gemini_model_catalog" in config["models"]
+    assert "claude_code_model_catalog" in config["models"]
 
 
 def test_load_config_missing_file_raises_config_not_found():

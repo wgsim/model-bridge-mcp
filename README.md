@@ -69,6 +69,10 @@ Behavior:
 ## Unified Ask API
 You can use the new unified tool:
 - `ask(prompt, provider="auto|codex|gemini|ollama|claude_code", model="default|auto|...")`
+- For `codex`/`gemini`/`claude_code`, set `model="<provider-model-id>"` to forward model selection to each CLI.
+- For `codex`/`gemini`/`claude_code`, model trial policy is:
+  - explicit `model` => try that model first, then retry once without `--model`
+  - no explicit `model` => try provider catalog models in order, then retry once without `--model`
 - Common options across ask tools:
   - `timeout_seconds`
   - `max_output_tokens`
@@ -162,6 +166,21 @@ Interpretation guide:
 - `missing`: configured models not currently installed.
 - `pull_commands`: ready-to-run install commands for missing models.
 
+## Provider Model Inventory Tool
+Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code")` to inspect model options per provider.
+
+- `ollama`: dynamic runtime inventory (`installed`, `missing`, `pull_commands`).
+- `codex/gemini/claude_code`: config-based catalog from:
+  - `models.codex_model_catalog`
+  - `models.gemini_model_catalog`
+  - `models.claude_code_model_catalog`
+- Each non-ollama provider includes `model_flag="--model"` and configured command metadata.
+- Current default catalogs:
+  - `codex`: `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.3-codex`
+  - `gemini`: `gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3-pro-preview`
+  - `claude_code`: `haiku`, `sonnet`, `opus`
+- Note: some Gemini preview models may require additional internal flags/account enablement.
+
 Telemetry note:
 - `model_bridge.telemetry` logs structured events to stderr.
 - Current fields include `request_id`, `routing_tier`, `status`, `error_category`, and `latency_ms`.
@@ -187,7 +206,7 @@ Integration smoke coverage:
 - New entrypoint:
   - `src/model_bridge/main.py`
 - Existing tool signatures are preserved:
-  - `ask_chatgpt_cli(prompt, save_path=None, force_model=False)`
-  - `ask_gemini_cli(prompt, save_path=None, force_model=False)`
-  - `ask_claude_code(prompt, save_path=None, force_model=False)`
+  - `ask_chatgpt_cli(prompt, save_path=None, force_model=False, model=None)`
+  - `ask_gemini_cli(prompt, save_path=None, force_model=False, model=None)`
+  - `ask_claude_code(prompt, save_path=None, force_model=False, model=None)`
   - `ask_ollama(prompt, save_path=None, model=\"default\")`

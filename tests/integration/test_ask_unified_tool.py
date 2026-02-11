@@ -47,6 +47,19 @@ def test_ask_unified_routes_to_claude_code(monkeypatch):
     assert out == "claude-code-result"
 
 
+def test_ask_unified_forwards_model_to_codex_provider(monkeypatch):
+    captured = {}
+
+    async def _fake_codex_capture(*args, **kwargs):
+        captured["model"] = kwargs.get("model")
+        return "codex-result"
+
+    monkeypatch.setattr(main_module, "ask_chatgpt_cli", _fake_codex_capture)
+    out = asyncio.run(main_module.ask("hello", provider="codex", model="gpt-5"))
+    assert out == "codex-result"
+    assert captured["model"] == "gpt-5"
+
+
 def test_ask_unified_json_response(monkeypatch):
     monkeypatch.setattr(main_module, "ask_gemini_cli", _fake_gemini)
     out = asyncio.run(main_module.ask("hello", provider="gemini", response_format="json"))

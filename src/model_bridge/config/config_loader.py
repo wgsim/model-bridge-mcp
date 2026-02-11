@@ -49,6 +49,9 @@ class ModelsConfig(BaseModel):
     ollama_catalog: list[str] = Field(min_length=1)
     ollama_aliases: dict[str, str] = Field(min_length=1)
     ollama_local_fallback_chain: list[str] = Field(min_length=1)
+    codex_model_catalog: list[str] = Field(default_factory=list)
+    gemini_model_catalog: list[str] = Field(default_factory=list)
+    claude_code_model_catalog: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_ollama_model_links(self) -> "ModelsConfig":

@@ -90,6 +90,7 @@ class FailoverManager:
         mode: str,
         force_primary: bool = False,
         allow_tertiary: bool = True,
+        provider_args: dict[str, Sequence[str]] | None = None,
     ) -> str:
         return asyncio.run(
             self.execute_async(
@@ -99,6 +100,7 @@ class FailoverManager:
                 mode=mode,
                 force_primary=force_primary,
                 allow_tertiary=allow_tertiary,
+                provider_args=provider_args,
             )
         )
 
@@ -111,9 +113,11 @@ class FailoverManager:
         force_primary: bool = False,
         allow_tertiary: bool = True,
         timeout_seconds: float | None = None,
+        provider_args: dict[str, Sequence[str]] | None = None,
     ) -> str:
         request_id = uuid.uuid4().hex
         start_ts = time.perf_counter()
+        provider_args = provider_args or {}
 
         ok, sec_msg = self.sanitizer.inspect(prompt, mode=mode)
         if not ok:
@@ -132,7 +136,9 @@ class FailoverManager:
         routing_log: List[str] = []
 
         routing_log.append(f"[1] Primary ({primary}): Trying...")
-        success, output = await self._run_adapter(primary, [], prompt, timeout_seconds=timeout_seconds)
+        success, output = await self._run_adapter(
+            primary, provider_args.get(primary, []), prompt, timeout_seconds=timeout_seconds
+        )
         if success:
             routing_log.append("    [SUCCESS]")
             self._emit_telemetry(
@@ -169,7 +175,10 @@ class FailoverManager:
         failover_prompt = f"[Context: {primary} failed] {prompt}"
         routing_log.append(f"[2] Secondary ({secondary}): Trying...")
         success, output = await self._run_adapter(
-            secondary, [], failover_prompt, timeout_seconds=timeout_seconds
+            secondary,
+            provider_args.get(secondary, []),
+            failover_prompt,
+            timeout_seconds=timeout_seconds,
         )
         if success:
             routing_log.append("    [SUCCESS]")
@@ -191,7 +200,10 @@ class FailoverManager:
             backup_model = self.config["models"]["ollama_final_backup_model"]
             routing_log.append("[3] Ollama: Trying...")
             success, output = await self._run_adapter(
-                "ollama", [backup_model], failover_prompt, timeout_seconds=timeout_seconds
+                "ollama",
+                list(provider_args.get("ollama", [])) or [backup_model],
+                failover_prompt,
+                timeout_seconds=timeout_seconds,
             )
             if success:
                 routing_log.append("    [SUCCESS]")

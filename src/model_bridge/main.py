@@ -168,6 +168,7 @@ async def _dispatch_ask_provider(
         )
     return await handler(
         prompt,
+        model=model,
         force_model=force_model,
         **common_kwargs,
     )
@@ -472,6 +473,7 @@ async def _execute_failover_with_timeout(
     force_primary: bool = False,
     allow_tertiary: bool = True,
     timeout_seconds: float,
+    provider_args: dict[str, list[str]] | None = None,
 ) -> str:
     failover = _get_failover()
     execute_async = failover.execute_async
@@ -479,16 +481,14 @@ async def _execute_failover_with_timeout(
     supports_timeout = "timeout_seconds" in params or any(
         param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
     )
+    supports_provider_args = "provider_args" in params or any(
+        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
+    )
+    kwargs: dict[str, object] = {}
     if supports_timeout:
-        return await execute_async(
-            primary,
-            secondary,
-            prompt,
-            mode,
-            force_primary=force_primary,
-            allow_tertiary=allow_tertiary,
-            timeout_seconds=timeout_seconds,
-        )
+        kwargs["timeout_seconds"] = timeout_seconds
+    if supports_provider_args and provider_args is not None:
+        kwargs["provider_args"] = provider_args
     return await execute_async(
         primary,
         secondary,
@@ -496,7 +496,46 @@ async def _execute_failover_with_timeout(
         mode,
         force_primary=force_primary,
         allow_tertiary=allow_tertiary,
+        **kwargs,
     )
+
+
+def _normalize_model_override(provider: str, model: str | None) -> str | None:
+    token = (model or "").strip()
+    if not token:
+        return None
+    if provider != "ollama" and token in {"default", "auto"}:
+        return None
+    return token
+
+
+def _build_provider_model_args(provider: str, model: str | None) -> list[str]:
+    if not model:
+        return []
+    if provider in {"codex", "gemini", "claude_code"}:
+        return ["--model", model]
+    return []
+
+
+def _is_task_execution_failed(response: str) -> bool:
+    return response.startswith("[Task Execution Failed]")
+
+
+def _build_provider_model_trials(provider: str, requested_model: str | None) -> list[str | None]:
+    explicit = _normalize_model_override(provider, requested_model)
+    trials: list[str | None] = []
+    if explicit:
+        trials.append(explicit)
+    else:
+        catalog_key = f"{provider}_model_catalog"
+        catalog = _get_config().get("models", {}).get(catalog_key, [])
+        for item in catalog:
+            token = (item or "").strip()
+            if token and token not in trials:
+                trials.append(token)
+    if None not in trials:
+        trials.append(None)
+    return trials
 
 
 def _mark_cached_json_payload(payload_or_text: object) -> str | None:
@@ -549,11 +588,27 @@ def _get_installed_ollama_models() -> tuple[list[str], str]:
     return _parse_ollama_list_output(proc.stdout), ""
 
 
+def _list_static_provider_models(provider_id: str) -> dict:
+    models_cfg = _get_config()["models"]
+    commands_cfg = _get_config()["commands"]
+    catalog_key = f"{provider_id}_model_catalog"
+    catalog = models_cfg.get(catalog_key, [])
+    return {
+        "configured": _is_provider_configured(provider_id),
+        "source": "config",
+        "model_flag": "--model",
+        "catalog": catalog,
+        "catalog_count": len(catalog),
+        "command": commands_cfg.get(provider_id, {}).get("exec", []),
+    }
+
+
 @mcp.tool()
 async def ask_chatgpt_cli(
     prompt: str,
     save_path: str = None,
     force_model: bool = False,
+    model: str | None = None,
     timeout_seconds: float | None = None,
     max_output_tokens: int | None = None,
     response_format: str | None = None,
@@ -563,15 +618,25 @@ async def ask_chatgpt_cli(
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    response = await _execute_failover_with_timeout(
-        "codex",
-        "gemini",
-        prompt,
-        "execution",
-        force_primary=force_model,
-        allow_tertiary=True,
-        timeout_seconds=options["timeout_seconds"],
-    )
+    response = ""
+    for trial_model in _build_provider_model_trials("codex", model):
+        provider_args = (
+            {"codex": _build_provider_model_args("codex", trial_model)}
+            if trial_model is not None
+            else None
+        )
+        response = await _execute_failover_with_timeout(
+            "codex",
+            "gemini",
+            prompt,
+            "execution",
+            force_primary=force_model,
+            allow_tertiary=True,
+            timeout_seconds=options["timeout_seconds"],
+            provider_args=provider_args,
+        )
+        if not _is_task_execution_failed(response):
+            break
     response = _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
     return _finalize_response(response, "codex", options)
 
@@ -581,6 +646,7 @@ async def ask_gemini_cli(
     prompt: str,
     save_path: str = None,
     force_model: bool = False,
+    model: str | None = None,
     timeout_seconds: float | None = None,
     max_output_tokens: int | None = None,
     response_format: str | None = None,
@@ -590,15 +656,25 @@ async def ask_gemini_cli(
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    response = await _execute_failover_with_timeout(
-        "gemini",
-        "codex",
-        prompt,
-        "analysis",
-        force_primary=force_model,
-        allow_tertiary=True,
-        timeout_seconds=options["timeout_seconds"],
-    )
+    response = ""
+    for trial_model in _build_provider_model_trials("gemini", model):
+        provider_args = (
+            {"gemini": _build_provider_model_args("gemini", trial_model)}
+            if trial_model is not None
+            else None
+        )
+        response = await _execute_failover_with_timeout(
+            "gemini",
+            "codex",
+            prompt,
+            "analysis",
+            force_primary=force_model,
+            allow_tertiary=True,
+            timeout_seconds=options["timeout_seconds"],
+            provider_args=provider_args,
+        )
+        if not _is_task_execution_failed(response):
+            break
     response = _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
     return _finalize_response(response, "gemini", options)
 
@@ -689,6 +765,7 @@ async def ask_claude_code(
     prompt: str,
     save_path: str = None,
     force_model: bool = False,
+    model: str | None = None,
     timeout_seconds: float | None = None,
     max_output_tokens: int | None = None,
     response_format: str | None = None,
@@ -705,15 +782,25 @@ async def ask_claude_code(
             "claude_code",
             options,
         )
-    response = await _execute_failover_with_timeout(
-        "claude_code",
-        "codex",
-        prompt,
-        "analysis",
-        force_primary=force_model,
-        allow_tertiary=True,
-        timeout_seconds=options["timeout_seconds"],
-    )
+    response = ""
+    for trial_model in _build_provider_model_trials("claude_code", model):
+        provider_args = (
+            {"claude_code": _build_provider_model_args("claude_code", trial_model)}
+            if trial_model is not None
+            else None
+        )
+        response = await _execute_failover_with_timeout(
+            "claude_code",
+            "codex",
+            prompt,
+            "analysis",
+            force_primary=force_model,
+            allow_tertiary=True,
+            timeout_seconds=options["timeout_seconds"],
+            provider_args=provider_args,
+        )
+        if not _is_task_execution_failed(response):
+            break
     response = _save_if_requested(response, save_path, tool_name="ask_claude_code")
     return _finalize_response(response, "claude_code", options)
 
@@ -810,6 +897,41 @@ def list_ollama_models() -> str:
     if error:
         payload["error"] = error
     return json.dumps(payload, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_provider_models(provider: str = "all") -> str:
+    normalized = (provider or "all").strip().lower()
+    allowed = {"all", "codex", "gemini", "ollama", "claude_code"}
+    if normalized not in allowed:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": f"Unknown provider '{provider}'. Use one of: all|codex|gemini|ollama|claude_code",
+            },
+            ensure_ascii=False,
+        )
+
+    if normalized == "all":
+        targets = ["codex", "gemini", "ollama", "claude_code"]
+    else:
+        targets = [normalized]
+
+    providers_payload: dict[str, dict] = {}
+    for target in targets:
+        if target == "ollama":
+            providers_payload[target] = json.loads(list_ollama_models())
+        else:
+            providers_payload[target] = _list_static_provider_models(target)
+
+    return json.dumps(
+        {
+            "status": "ok",
+            "requested_provider": normalized,
+            "providers": providers_payload,
+        },
+        ensure_ascii=False,
+    )
 
 
 def run() -> None:
