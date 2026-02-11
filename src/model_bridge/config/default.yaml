@@ -80,6 +80,15 @@ runtime:
   session_memory_ttl_seconds: 1800
   session_memory_max_turns: 6
   auto_routing_short_prompt_threshold: 120
+  ollama_resource_guard_enabled: true
+  ollama_resource_guard_default_max_concurrency: 1
+  ollama_resource_guard_hard_cap: 2
+  ollama_resource_guard_safety_factor: 0.6
+  ollama_resource_guard_reserve_ram_gb: 2.0
+  ollama_model_memory_gb:
+    "gpt-oss:20b": 18.0
+    "glm-4.7-flash:Q8_0": 6.0
+    "qwen3-coder-next:Q4_K_M": 10.0
   apply_system_suffix:
     codex: true
     gemini: true

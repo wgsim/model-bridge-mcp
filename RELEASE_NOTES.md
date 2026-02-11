@@ -1,5 +1,28 @@
 # Release Notes
 
+## v0.1.4 - 2026-02-11
+
+### Summary
+- Added resource-aware ollama concurrency guard for MCP-internal batch execution.
+
+### Highlights
+- Enhanced `ask_batch` for `provider="ollama"`:
+  - applies runtime resource-aware concurrency clamp
+  - reports `requested_max_concurrency` and `applied_max_concurrency`
+  - includes `concurrency_guard` metadata in batch response
+- Added runtime resource/guard MCP tool:
+  - `list_runtime_resources(model, requested_max_concurrency)`
+- Added runtime config fields:
+  - `runtime.ollama_resource_guard_enabled`
+  - `runtime.ollama_resource_guard_default_max_concurrency`
+  - `runtime.ollama_resource_guard_hard_cap`
+  - `runtime.ollama_resource_guard_safety_factor`
+  - `runtime.ollama_resource_guard_reserve_ram_gb`
+  - `runtime.ollama_model_memory_gb`
+- Added unit tests:
+  - `tests/unit/test_main_runtime_resources.py`
+  - updated `tests/unit/test_main_ask_batch.py`
+
 ## v0.1.3 - 2026-02-11
 
 ### Summary

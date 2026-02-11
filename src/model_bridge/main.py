@@ -401,6 +401,120 @@ def _resolve_ollama_model(model_arg: str) -> tuple[str | None, str]:
     )
 
 
+def _safe_gb(value_bytes: int | None) -> float | None:
+    if value_bytes is None:
+        return None
+    return round(value_bytes / (1024**3), 2)
+
+
+def _detect_ram_bytes() -> tuple[int | None, int | None]:
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        total_pages = int(os.sysconf("SC_PHYS_PAGES"))
+        available_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
+        return page_size * total_pages, page_size * available_pages
+    except (ValueError, OSError, AttributeError):
+        return None, None
+
+
+def _detect_nvidia_vram_bytes() -> tuple[int | None, int | None]:
+    if not shutil.which("nvidia-smi"):
+        return None, None
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.total,memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2,
+        )
+    except Exception:
+        return None, None
+    if result.returncode != 0:
+        return None, None
+    total_mib = 0
+    free_mib = 0
+    for line in result.stdout.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) != 2:
+            continue
+        try:
+            total_mib += int(parts[0])
+            free_mib += int(parts[1])
+        except ValueError:
+            continue
+    if total_mib <= 0:
+        return None, None
+    mib = 1024 * 1024
+    return total_mib * mib, free_mib * mib
+
+
+def _collect_runtime_resources() -> dict:
+    ram_total_bytes, ram_free_bytes = _detect_ram_bytes()
+    vram_total_bytes, vram_free_bytes = _detect_nvidia_vram_bytes()
+    return {
+        "ram_total_gb": _safe_gb(ram_total_bytes),
+        "ram_free_gb": _safe_gb(ram_free_bytes),
+        "vram_total_gb": _safe_gb(vram_total_bytes),
+        "vram_free_gb": _safe_gb(vram_free_bytes),
+        "vram_detector": "nvidia-smi" if vram_total_bytes is not None else "unavailable",
+    }
+
+
+def _compute_ollama_batch_concurrency(model: str, requested_max_concurrency: int) -> dict:
+    runtime_cfg = _get_config().get("runtime", {})
+    default_max = int(runtime_cfg.get("ollama_resource_guard_default_max_concurrency", 1))
+    hard_cap = int(runtime_cfg.get("ollama_resource_guard_hard_cap", 2))
+    guard_enabled = bool(runtime_cfg.get("ollama_resource_guard_enabled", True))
+    requested = max(1, int(requested_max_concurrency))
+    resolved_model, _ = _resolve_ollama_model(model)
+    if resolved_model is None:
+        resolved_model = _get_config()["models"]["ollama_default_model"]
+
+    if not guard_enabled:
+        applied = max(1, min(requested, hard_cap))
+        return {
+            "resolved_model": resolved_model,
+            "applied_max_concurrency": applied,
+            "reason": "resource_guard_disabled",
+            "resources": _collect_runtime_resources(),
+        }
+
+    resources = _collect_runtime_resources()
+    model_mem_map = runtime_cfg.get("ollama_model_memory_gb", {})
+    model_mem_gb = model_mem_map.get(resolved_model)
+    ram_free_gb = resources.get("ram_free_gb")
+    reserve_ram_gb = float(runtime_cfg.get("ollama_resource_guard_reserve_ram_gb", 2.0))
+    safety_factor = float(runtime_cfg.get("ollama_resource_guard_safety_factor", 0.6))
+
+    allowed = default_max
+    reason = "default_conservative_guard"
+
+    if model_mem_gb and ram_free_gb is not None:
+        usable_gb = max(0.0, float(ram_free_gb) - reserve_ram_gb)
+        if model_mem_gb > 0:
+            estimated = int((usable_gb * safety_factor) // float(model_mem_gb))
+            allowed = max(default_max, estimated)
+            reason = "resource_based_estimation"
+    elif ram_free_gb is None:
+        reason = "ram_unavailable_default_guard"
+    else:
+        reason = "model_profile_missing_default_guard"
+
+    allowed = max(1, min(allowed, hard_cap))
+    applied = max(1, min(requested, allowed))
+    return {
+        "resolved_model": resolved_model,
+        "applied_max_concurrency": applied,
+        "reason": reason,
+        "resources": resources,
+    }
+
+
 def _mask_sensitive_text(text: str) -> str:
     masked = re.sub(
         r"(?i)(authorization\s*:\s*bearer\s+)([^\s]+)",
@@ -936,6 +1050,11 @@ async def ask_batch(
             {"status": "error", "error": "prompts must contain non-empty items"},
             ensure_ascii=False,
         )
+    effective_max_concurrency = max_concurrency
+    concurrency_meta = None
+    if provider.strip().lower() == "ollama":
+        concurrency_meta = _compute_ollama_batch_concurrency(model, max_concurrency)
+        effective_max_concurrency = concurrency_meta["applied_max_concurrency"]
 
     async def _run_one(idx: int, prompt_text: str) -> dict:
         job_session_id = f"{session_id}:job-{idx}" if session_id else None
@@ -975,7 +1094,7 @@ async def ask_batch(
         for idx, prompt_text in enumerate(cleaned_prompts):
             results.append(await _run_one(idx, prompt_text))
     else:
-        sem = asyncio.Semaphore(max_concurrency)
+        sem = asyncio.Semaphore(effective_max_concurrency)
 
         async def _run_with_limit(idx: int, prompt_text: str) -> dict:
             async with sem:
@@ -991,11 +1110,15 @@ async def ask_batch(
         "mode": normalized_mode,
         "provider": provider,
         "model": model,
+        "requested_max_concurrency": max_concurrency,
+        "applied_max_concurrency": effective_max_concurrency,
         "total_jobs": len(results),
         "ok_jobs": ok_count,
         "error_jobs": err_count,
         "results": results,
     }
+    if concurrency_meta is not None:
+        payload["concurrency_guard"] = concurrency_meta
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -1089,6 +1212,18 @@ def list_orchestrator_capabilities() -> str:
             }
         },
         "fallback_rule": "If external parallel behavior is unclear, route all fan-out through ask_batch.",
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_runtime_resources(model: str = "default", requested_max_concurrency: int = 1) -> str:
+    ollama_meta = _compute_ollama_batch_concurrency(model, requested_max_concurrency)
+    payload = {
+        "status": "ok",
+        "requested_model": model,
+        "requested_max_concurrency": requested_max_concurrency,
+        "ollama_recommendation": ollama_meta,
     }
     return json.dumps(payload, ensure_ascii=False)
 

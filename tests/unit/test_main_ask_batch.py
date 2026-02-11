@@ -60,3 +60,35 @@ def test_ask_batch_runs_parallel(monkeypatch):
     assert '"mode": "parallel"' in out
     assert '"total_jobs": 3' in out
     assert '"ok_jobs": 3' in out
+
+
+def test_ask_batch_clamps_ollama_parallelism(monkeypatch):
+    async def _fake_ask(**kwargs):
+        await asyncio.sleep(0)
+        return f"ok:{kwargs['prompt']}"
+
+    monkeypatch.setattr(main_module, "ask", _fake_ask)
+    monkeypatch.setattr(main_module, "time", type("_T", (), {"perf_counter": _FakeClock()})())
+    monkeypatch.setattr(
+        main_module,
+        "_compute_ollama_batch_concurrency",
+        lambda model, requested: {
+            "resolved_model": "gpt-oss:20b",
+            "applied_max_concurrency": 1,
+            "reason": "test_guard",
+            "resources": {"ram_free_gb": 8.0},
+        },
+    )
+
+    out = asyncio.run(
+        main_module.ask_batch(
+            prompts=["a", "b", "c"],
+            provider="ollama",
+            mode="parallel",
+            max_concurrency=8,
+        )
+    )
+
+    assert '"requested_max_concurrency": 8' in out
+    assert '"applied_max_concurrency": 1' in out
+    assert '"concurrency_guard"' in out

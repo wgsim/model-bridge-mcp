@@ -95,6 +95,13 @@ Use `ask_batch(...)` to process multiple prompts in one MCP call.
 
 `ask_batch` executes within MCP server orchestration, so external client parallelism is not required.
 
+Ollama safety behavior:
+- For `provider="ollama"` in `mode="parallel"`, concurrency is automatically clamped by runtime resource guard.
+- Default conservative start is `1`.
+- Guard uses runtime RAM/VRAM visibility and model memory profile from config:
+  - `runtime.ollama_resource_guard_*`
+  - `runtime.ollama_model_memory_gb`
+
 ## Skill Workflows
 This repository now includes workflow-oriented skill definitions under `skills/`.
 
@@ -214,6 +221,14 @@ Use `list_orchestrator_capabilities()` to inspect external orchestrator assumpti
   - `claude_code`
 - Fallback rule:
   - if external parallel behavior is uncertain, use MCP-internal parallel orchestration
+
+## Runtime Resource Tool
+Use `list_runtime_resources(model=\"default\", requested_max_concurrency=1)` to inspect runtime resource snapshot and ollama concurrency recommendation.
+
+- Returns:
+  - `ram_total_gb`, `ram_free_gb`
+  - `vram_total_gb`, `vram_free_gb`, `vram_detector`
+  - `ollama_recommendation.applied_max_concurrency`
 
 Telemetry note:
 - `model_bridge.telemetry` logs structured events to stderr.

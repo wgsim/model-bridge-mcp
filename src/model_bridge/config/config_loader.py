@@ -123,6 +123,12 @@ class RuntimeConfig(BaseModel):
     session_memory_ttl_seconds: int = Field(default=1800, ge=1)
     session_memory_max_turns: int = Field(default=6, ge=1)
     auto_routing_short_prompt_threshold: int = Field(default=120, ge=1)
+    ollama_resource_guard_enabled: bool = True
+    ollama_resource_guard_default_max_concurrency: int = Field(default=1, ge=1)
+    ollama_resource_guard_hard_cap: int = Field(default=2, ge=1)
+    ollama_resource_guard_safety_factor: float = Field(default=0.6, gt=0, le=1)
+    ollama_resource_guard_reserve_ram_gb: float = Field(default=2.0, ge=0)
+    ollama_model_memory_gb: dict[str, float] = Field(default_factory=dict)
 
 
 class AppConfig(BaseModel):
