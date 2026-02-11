@@ -3,7 +3,7 @@ commands:
     exec: ["codex", "exec", "--skip-git-repo-check"]
     health: ["codex", "--version"]
   gemini:
-    exec: ["gemini"]
+    exec: ["gemini", "-p"]
     health: ["gemini", "--version"]
   ollama:
     exec: ["ollama", "run"]

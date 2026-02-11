@@ -58,6 +58,15 @@ def test_ask_gemini_cli_smoke(monkeypatch):
     assert "--- [Routing Log] ---" in result
 
 
+def test_ask_claude_code_smoke(monkeypatch):
+    monkeypatch.setattr(main_module, "_get_failover", lambda: _FakeFailover())
+    monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
+    result = asyncio.run(main_module.ask_claude_code("review this"))
+
+    assert "claude_code-codex-ok:review this:analysis:False:True" in result
+    assert "--- [Routing Log] ---" in result
+
+
 def test_ask_ollama_smoke_local_success(monkeypatch):
     monkeypatch.setattr(main_module, "_get_config", _fake_config)
     monkeypatch.setattr(main_module, "_get_adapter", lambda: _FakeAdapter())

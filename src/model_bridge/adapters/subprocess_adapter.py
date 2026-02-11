@@ -42,7 +42,14 @@ class SubprocessAdapter(CLIAdapter):
         else:
             full_input = input_text
         full_cmd = cmd_base + list(args)
-        return True, "", full_cmd, full_input
+        stdin_input = full_input
+        # Providers using `-p/--prompt` expect the prompt as a CLI argument.
+        if service_name in {"gemini", "claude_code"} and any(
+            flag in cmd_base for flag in ("-p", "--prompt")
+        ):
+            full_cmd = full_cmd + [full_input]
+            stdin_input = ""
+        return True, "", full_cmd, stdin_input
 
     @staticmethod
     def _provider_timeout_hint(service_name: str, details: str) -> str:

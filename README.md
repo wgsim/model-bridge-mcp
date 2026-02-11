@@ -25,7 +25,7 @@ python -m pip install mcp PyYAML pytest
 ## Configuration
 The default configuration file is `src/model_bridge/config/default.yaml`.
 
-- `commands`: codex/gemini/ollama execution and health commands
+- `commands`: codex/gemini/ollama/claude_code execution and health commands
 - `routing.default_chains`: default failover chain per tool
 - `models`: default/final-backup ollama models, catalog, aliases, local fallback chain
 - `security`: block patterns and sensitive paths
@@ -68,7 +68,7 @@ Behavior:
 
 ## Unified Ask API
 You can use the new unified tool:
-- `ask(prompt, provider="auto|codex|gemini|ollama", model="default|auto|...")`
+- `ask(prompt, provider="auto|codex|gemini|ollama|claude_code", model="default|auto|...")`
 - Common options across ask tools:
   - `timeout_seconds`
   - `max_output_tokens`
@@ -90,7 +90,7 @@ import shutil
 from model_bridge.config.config_loader import load_config
 cfg = load_config()
 print(\"--- CLI Health Check ---\")
-for name in [\"codex\", \"gemini\", \"ollama\"]:
+for name in [\"codex\", \"gemini\", \"ollama\", \"claude_code\"]:
     cmd = cfg[\"commands\"][name][\"health\"][0]
     status = \"Online\" if shutil.which(cmd) else \"Offline\"
     print(f\"[{name.capitalize()}]: {status}\")
@@ -103,6 +103,7 @@ Example output:
 [Codex]: Online
 [Gemini]: Online
 [Ollama]: Online
+[Claude_code]: Online
 ```
 
 ## Routing Log Example
@@ -177,7 +178,7 @@ conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests'
 
 Integration smoke coverage:
 - `tests/integration/test_tool_smoke.py`
-- verifies `ask_chatgpt_cli`, `ask_gemini_cli`, `ask_ollama`, and `list_ollama_models` entrypoint paths with minimal mocks.
+- verifies `ask_chatgpt_cli`, `ask_gemini_cli`, `ask_claude_code`, `ask_ollama`, and `list_ollama_models` entrypoint paths with minimal mocks.
 
 ## Migration Note
 - Legacy source:
@@ -188,4 +189,5 @@ Integration smoke coverage:
 - Existing tool signatures are preserved:
   - `ask_chatgpt_cli(prompt, save_path=None, force_model=False)`
   - `ask_gemini_cli(prompt, save_path=None, force_model=False)`
+  - `ask_claude_code(prompt, save_path=None, force_model=False)`
   - `ask_ollama(prompt, save_path=None, model=\"default\")`

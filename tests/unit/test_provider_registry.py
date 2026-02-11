@@ -50,3 +50,21 @@ def test_build_default_provider_registry_marks_configured_from_commands():
     assert registry.get("codex").configured is True
     assert registry.get("claude_code").configured is False
     assert registry.list_provider_ids() == ["claude_code", "codex", "gemini", "ollama"]
+
+
+def test_build_default_provider_registry_sets_claude_capabilities_to_parity_defaults():
+    cfg = {
+        "commands": {
+            "codex": {"exec": ["codex"], "health": ["codex", "--version"]},
+            "gemini": {"exec": ["gemini"], "health": ["gemini", "--version"]},
+            "ollama": {"exec": ["ollama", "run"], "health": ["ollama", "--version"]},
+            "claude_code": {"exec": ["claude", "-p"], "health": ["claude", "--version"]},
+        }
+    }
+    registry = build_default_provider_registry(cfg)
+
+    claude = registry.get("claude_code")
+    assert claude is not None
+    assert claude.configured is True
+    assert claude.capabilities.supports_json is True
+    assert claude.capabilities.supports_force_model is True

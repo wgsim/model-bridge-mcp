@@ -45,7 +45,7 @@ def build_default_provider_registry(config: dict) -> ProviderRegistry:
         "gemini": ProviderCapabilities(supports_json=True, supports_stream=False, supports_force_model=True),
         "ollama": ProviderCapabilities(supports_json=True, supports_stream=False, supports_force_model=False),
         "claude_code": ProviderCapabilities(
-            supports_json=False, supports_stream=False, supports_force_model=False
+            supports_json=True, supports_stream=False, supports_force_model=True
         ),
     }
     for provider_id, capabilities in defaults.items():

@@ -35,6 +35,22 @@ class _TypeErrorOnTimeoutFailover:
         return "unexpected success"
 
 
+class _CaptureClaudeFailover:
+    def __init__(self):
+        self.last = {}
+
+    async def execute_async(self, primary, secondary, prompt, mode, **kwargs):
+        self.last = {
+            "primary": primary,
+            "secondary": secondary,
+            "prompt": prompt,
+            "mode": mode,
+            "force_primary": kwargs.get("force_primary"),
+            "timeout_seconds": kwargs.get("timeout_seconds"),
+        }
+        return "claude ok"
+
+
 def test_ask_chatgpt_cli_supports_json_format(monkeypatch):
     monkeypatch.setattr(main_module, "_get_failover", lambda: _FakeFailover())
     out = asyncio.run(
@@ -73,3 +89,25 @@ def test_ask_chatgpt_cli_does_not_swallow_internal_typeerror(monkeypatch):
 def test_ask_gemini_cli_rejects_invalid_verbosity():
     with pytest.raises(ValueError, match="verbosity must be one of"):
         asyncio.run(main_module.ask_gemini_cli("hi", verbosity="invalid"))
+
+
+def test_ask_claude_code_supports_json_and_force_model(monkeypatch):
+    fake_failover = _CaptureClaudeFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
+
+    out = asyncio.run(
+        main_module.ask_claude_code(
+            "review me",
+            force_model=True,
+            timeout_seconds=9,
+            response_format="json",
+        )
+    )
+    payload = json.loads(out)
+    assert payload["provider"] == "claude_code"
+    assert payload["content"] == "claude ok"
+    assert fake_failover.last["primary"] == "claude_code"
+    assert fake_failover.last["secondary"] == "codex"
+    assert fake_failover.last["force_primary"] is True
+    assert fake_failover.last["timeout_seconds"] == 9
