@@ -44,10 +44,17 @@ class SubprocessAdapter(CLIAdapter):
         full_cmd = cmd_base + list(args)
         return True, "", full_cmd, full_input
 
-    def run(self, service_name: str, args: Sequence[str], input_text: str) -> Tuple[bool, str]:
+    def run(
+        self,
+        service_name: str,
+        args: Sequence[str],
+        input_text: str,
+        timeout_seconds: float | None = None,
+    ) -> Tuple[bool, str]:
         ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
         if not ok:
             return False, err
+        effective_timeout = timeout_seconds if timeout_seconds is not None else self.timeout_seconds
         try:
             result = subprocess.run(
                 full_cmd,
@@ -56,10 +63,10 @@ class SubprocessAdapter(CLIAdapter):
                 input=full_input,
                 env=self.env,
                 check=False,
-                timeout=self.timeout_seconds,
+                timeout=effective_timeout,
             )
         except subprocess.TimeoutExpired:
-            return False, f"Timeout Error: Command '{service_name}' exceeded {self.timeout_seconds}s"
+            return False, f"Timeout Error: Command '{service_name}' exceeded {effective_timeout}s"
         except Exception as exc:
             return False, str(exc)
 
@@ -68,11 +75,16 @@ class SubprocessAdapter(CLIAdapter):
         return False, (result.stdout + result.stderr).strip()
 
     async def run_async(
-        self, service_name: str, args: Sequence[str], input_text: str
+        self,
+        service_name: str,
+        args: Sequence[str],
+        input_text: str,
+        timeout_seconds: float | None = None,
     ) -> Tuple[bool, str]:
         ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
         if not ok:
             return False, err
+        effective_timeout = timeout_seconds if timeout_seconds is not None else self.timeout_seconds
         try:
             proc = await asyncio.create_subprocess_exec(
                 *full_cmd,
@@ -81,17 +93,17 @@ class SubprocessAdapter(CLIAdapter):
                 stderr=asyncio.subprocess.PIPE,
                 env=self.env,
             )
-            if self.timeout_seconds is None:
+            if effective_timeout is None:
                 stdout_bytes, stderr_bytes = await proc.communicate(full_input.encode("utf-8"))
             else:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
                     proc.communicate(full_input.encode("utf-8")),
-                    timeout=self.timeout_seconds,
+                    timeout=effective_timeout,
                 )
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            return False, f"Timeout Error: Command '{service_name}' exceeded {self.timeout_seconds}s"
+            return False, f"Timeout Error: Command '{service_name}' exceeded {effective_timeout}s"
         except Exception as exc:
             return False, str(exc)
 

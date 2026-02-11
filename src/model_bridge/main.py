@@ -9,7 +9,7 @@ import time
 import json
 import shutil
 import subprocess
-from contextlib import contextmanager
+import inspect
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -139,20 +139,6 @@ def _normalize_ask_options(
     if resolved["max_output_tokens"] < 0:
         raise ValueError("max_output_tokens must be >= 0")
     return resolved
-
-
-@contextmanager
-def _temporary_timeout(timeout_seconds: float):
-    adapter = _get_adapter()
-    if not hasattr(adapter, "timeout_seconds"):
-        yield
-        return
-    original = adapter.timeout_seconds
-    adapter.timeout_seconds = timeout_seconds
-    try:
-        yield
-    finally:
-        adapter.timeout_seconds = original
 
 
 def _apply_verbosity(text: str, verbosity: str) -> str:
@@ -398,6 +384,78 @@ def _resolve_fallback_chain(requested_model: str) -> list[str]:
     return ordered
 
 
+async def _run_ollama_with_timeout(model_name: str, prompt: str, timeout_seconds: float) -> tuple[bool, str]:
+    adapter = _get_adapter()
+    run_async = adapter.run_async
+    params = inspect.signature(run_async).parameters
+    supports_timeout = "timeout_seconds" in params or any(
+        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
+    )
+    if supports_timeout:
+        return await run_async(
+            "ollama",
+            [model_name],
+            prompt,
+            timeout_seconds=timeout_seconds,
+        )
+    return await run_async("ollama", [model_name], prompt)
+
+
+async def _execute_failover_with_timeout(
+    primary: str,
+    secondary: str,
+    prompt: str,
+    mode: str,
+    *,
+    force_primary: bool = False,
+    allow_tertiary: bool = True,
+    timeout_seconds: float,
+) -> str:
+    failover = _get_failover()
+    execute_async = failover.execute_async
+    params = inspect.signature(execute_async).parameters
+    supports_timeout = "timeout_seconds" in params or any(
+        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
+    )
+    if supports_timeout:
+        return await execute_async(
+            primary,
+            secondary,
+            prompt,
+            mode,
+            force_primary=force_primary,
+            allow_tertiary=allow_tertiary,
+            timeout_seconds=timeout_seconds,
+        )
+    return await execute_async(
+        primary,
+        secondary,
+        prompt,
+        mode,
+        force_primary=force_primary,
+        allow_tertiary=allow_tertiary,
+    )
+
+
+def _mark_cached_json_payload(payload_or_text: object) -> str | None:
+    if isinstance(payload_or_text, dict):
+        if "content" in payload_or_text:
+            payload = dict(payload_or_text)
+            payload["cached"] = True
+            return json.dumps(payload, ensure_ascii=False)
+        return None
+    if not isinstance(payload_or_text, str):
+        return None
+    try:
+        parsed = json.loads(payload_or_text)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if isinstance(parsed, dict) and "content" in parsed:
+        parsed["cached"] = True
+        return json.dumps(parsed, ensure_ascii=False)
+    return None
+
+
 def _parse_ollama_list_output(output: str) -> list[str]:
     names: list[str] = []
     for raw_line in output.splitlines():
@@ -443,10 +501,15 @@ async def ask_chatgpt_cli(
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    with _temporary_timeout(options["timeout_seconds"]):
-        response = await _get_failover().execute_async(
-            "codex", "gemini", prompt, "execution", force_primary=force_model
-        )
+    response = await _execute_failover_with_timeout(
+        "codex",
+        "gemini",
+        prompt,
+        "execution",
+        force_primary=force_model,
+        allow_tertiary=True,
+        timeout_seconds=options["timeout_seconds"],
+    )
     response = _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
     return _finalize_response(response, "codex", options)
 
@@ -465,10 +528,15 @@ async def ask_gemini_cli(
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    with _temporary_timeout(options["timeout_seconds"]):
-        response = await _get_failover().execute_async(
-            "gemini", "codex", prompt, "analysis", force_primary=force_model
-        )
+    response = await _execute_failover_with_timeout(
+        "gemini",
+        "codex",
+        prompt,
+        "analysis",
+        force_primary=force_model,
+        allow_tertiary=True,
+        timeout_seconds=options["timeout_seconds"],
+    )
     response = _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
     return _finalize_response(response, "gemini", options)
 
@@ -523,28 +591,29 @@ async def ask_ollama(
             )
 
     last_local_error = ""
-    with _temporary_timeout(options["timeout_seconds"]):
-        for local_model in local_chain:
-            success, output = await _get_adapter().run_async("ollama", [local_model], prompt)
-            if success:
-                response = f"[Source: Ollama]\n{output}"
-                response = _save_if_requested(response, save_path, tool_name="ask_ollama")
-                return _finalize_response(response, "ollama", options)
-            last_local_error = output
+    for local_model in local_chain:
+        success, output = await _run_ollama_with_timeout(
+            local_model, prompt, options["timeout_seconds"]
+        )
+        if success:
+            response = f"[Source: Ollama]\n{output}"
+            response = _save_if_requested(response, save_path, tool_name="ask_ollama")
+            return _finalize_response(response, "ollama", options)
+        last_local_error = output
 
     logger.warning("Ollama unreachable. Failing over to cloud chain.")
     cloud_prompt = f"[WARNING: Local Ollama failed. Executing via Cloud Backup] {prompt}"
     if last_local_error:
         cloud_prompt = f"{cloud_prompt}\n\n[Local Error Summary]\n{last_local_error}"
-    with _temporary_timeout(options["timeout_seconds"]):
-        response = await _get_failover().execute_async(
-            "codex",
-            "gemini",
-            cloud_prompt,
-            "execution",
-            force_primary=False,
-            allow_tertiary=False,
-        )
+    response = await _execute_failover_with_timeout(
+        "codex",
+        "gemini",
+        cloud_prompt,
+        "execution",
+        force_primary=False,
+        allow_tertiary=False,
+        timeout_seconds=options["timeout_seconds"],
+    )
     response = _save_if_requested(response, save_path, tool_name="ask_ollama")
     return _finalize_response(response, "ollama", options)
 
@@ -583,7 +652,12 @@ async def ask(
         )
         cached = cache.get(cache_key)
         if cached is not None:
-            return _finalize_response(cached, normalized_provider, options, cached=True)
+            if options["response_format"] == "json":
+                normalized_cached = _mark_cached_json_payload(cached)
+                if normalized_cached is not None:
+                    return normalized_cached
+                return _finalize_response(cached, normalized_provider, options, cached=True)
+            return cached
 
     if normalized_provider in {"auto", "codex"}:
         raw = await ask_chatgpt_cli(
