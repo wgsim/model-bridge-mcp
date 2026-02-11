@@ -72,8 +72,18 @@ class _TrialSequenceFailover:
         provider_args = kwargs.get("provider_args")
         self.calls.append(provider_args)
         if provider_args:
-            return "[Task Execution Failed]\nmodel failed"
+            return "[Task Execution Failed]\nmodel not found"
         return "ok-without-model"
+
+
+class _NonModelFailureTrialFailover:
+    def __init__(self):
+        self.calls = []
+
+    async def execute_async(self, primary, secondary, prompt, mode, **kwargs):
+        provider_args = kwargs.get("provider_args")
+        self.calls.append(provider_args)
+        return "[Task Execution Failed]\nauthentication failed"
 
 
 def test_ask_chatgpt_cli_supports_json_format(monkeypatch):
@@ -194,3 +204,21 @@ def test_ask_gemini_cli_falls_back_to_no_model_after_catalog_failures(monkeypatc
         {"gemini": ["--model", "gemini-2.5-pro"]},
         None,
     ]
+
+
+def test_ask_gemini_cli_does_not_retry_models_on_non_model_failure(monkeypatch):
+    fake_failover = _NonModelFailureTrialFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(
+        main_module,
+        "_get_config",
+        lambda: {
+            "models": {"gemini_model_catalog": ["gemini-2.5-flash", "gemini-2.5-pro"]},
+            "runtime": {"ask_defaults": {"timeout_seconds": 120, "max_output_tokens": 0, "response_format": "text", "verbosity": "normal", "stream": False}},
+        },
+    )
+
+    out = asyncio.run(main_module.ask_gemini_cli("hi"))
+
+    assert out.startswith("[Task Execution Failed]")
+    assert fake_failover.calls == [{"gemini": ["--model", "gemini-2.5-flash"]}]

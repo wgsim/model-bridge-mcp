@@ -521,6 +521,22 @@ def _is_task_execution_failed(response: str) -> bool:
     return response.startswith("[Task Execution Failed]")
 
 
+def _is_model_selection_failure(response: str) -> bool:
+    if not _is_task_execution_failed(response):
+        return False
+    low = response.lower()
+    markers = (
+        "model not found",
+        "unknown model",
+        "invalid model",
+        "unsupported model",
+        "invalid value for '--model'",
+        "unrecognized option '--model'",
+        "unknown option '--model'",
+    )
+    return any(marker in low for marker in markers)
+
+
 def _build_provider_model_trials(provider: str, requested_model: str | None) -> list[str | None]:
     explicit = _normalize_model_override(provider, requested_model)
     trials: list[str | None] = []
@@ -637,6 +653,8 @@ async def ask_chatgpt_cli(
         )
         if not _is_task_execution_failed(response):
             break
+        if not _is_model_selection_failure(response):
+            break
     response = _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
     return _finalize_response(response, "codex", options)
 
@@ -674,6 +692,8 @@ async def ask_gemini_cli(
             provider_args=provider_args,
         )
         if not _is_task_execution_failed(response):
+            break
+        if not _is_model_selection_failure(response):
             break
     response = _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
     return _finalize_response(response, "gemini", options)
@@ -800,6 +820,8 @@ async def ask_claude_code(
             provider_args=provider_args,
         )
         if not _is_task_execution_failed(response):
+            break
+        if not _is_model_selection_failure(response):
             break
     response = _save_if_requested(response, save_path, tool_name="ask_claude_code")
     return _finalize_response(response, "claude_code", options)
