@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 
@@ -77,3 +78,24 @@ def test_runtime_is_initialized_lazily_once(monkeypatch):
     assert isinstance(main_module._get_adapter(), _Adapter)
     assert isinstance(main_module._get_failover(), _Failover)
     assert calls["count"] == 1
+
+
+def test_ask_claude_code_returns_setup_error_when_unconfigured(monkeypatch):
+    monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: False)
+
+    out = asyncio.run(main_module.ask_claude_code("hi"))
+
+    assert "[PROVIDER ERROR]" in out
+    assert "not configured" in out
+
+
+def test_ask_unknown_provider_uses_registry_provider_list(monkeypatch):
+    class _FakeRegistry:
+        def list_provider_ids(self):
+            return ["claude_code", "codex", "gemini", "ollama"]
+
+    monkeypatch.setattr(main_module, "_get_provider_registry", lambda: _FakeRegistry())
+
+    out = asyncio.run(main_module.ask("hello", provider="unknown-provider"))
+
+    assert "auto|claude_code|codex|gemini|ollama" in out

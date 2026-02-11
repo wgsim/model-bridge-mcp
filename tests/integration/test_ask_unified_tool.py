@@ -25,6 +25,10 @@ async def _fake_ollama(*args, **kwargs):
     return "ollama-result"
 
 
+async def _fake_claude_code(*args, **kwargs):
+    return "claude-code-result"
+
+
 def test_ask_unified_routes_to_codex(monkeypatch):
     monkeypatch.setattr(main_module, "ask_chatgpt_cli", _fake_codex)
     out = asyncio.run(main_module.ask("hello", provider="codex"))
@@ -35,6 +39,12 @@ def test_ask_unified_routes_to_ollama(monkeypatch):
     monkeypatch.setattr(main_module, "ask_ollama", _fake_ollama)
     out = asyncio.run(main_module.ask("hello", provider="ollama", model="default"))
     assert out == "ollama-result"
+
+
+def test_ask_unified_routes_to_claude_code(monkeypatch):
+    monkeypatch.setattr(main_module, "ask_claude_code", _fake_claude_code)
+    out = asyncio.run(main_module.ask("hello", provider="claude_code"))
+    assert out == "claude-code-result"
 
 
 def test_ask_unified_json_response(monkeypatch):

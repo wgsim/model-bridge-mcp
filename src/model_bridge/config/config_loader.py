@@ -27,6 +27,7 @@ class CommandsConfig(BaseModel):
     codex: ServiceCommand
     gemini: ServiceCommand
     ollama: ServiceCommand
+    claude_code: ServiceCommand | None = None
 
 
 class RoutingChains(BaseModel):
@@ -83,6 +84,7 @@ class RuntimeApplySystemSuffix(BaseModel):
     codex: bool
     gemini: bool
     ollama: bool
+    claude_code: bool = False
 
 
 class AskDefaultsConfig(BaseModel):

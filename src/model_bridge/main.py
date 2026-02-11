@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
 from model_bridge.config.config_loader import load_config
 from model_bridge.core.failover_manager import FailoverManager
+from model_bridge.core.provider_registry import ProviderRegistry, build_default_provider_registry
 from model_bridge.core.prompt_cache import PromptCache
 from model_bridge.core.session_memory import SessionMemory
 from model_bridge.security.sanitizer import SecuritySanitizer
@@ -35,6 +36,7 @@ ADAPTER: Optional[SubprocessAdapter] = None
 FAILOVER: Optional[FailoverManager] = None
 PROMPT_CACHE: Optional[PromptCache] = None
 SESSION_MEMORY: Optional[SessionMemory] = None
+PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
 
 
 def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
@@ -109,6 +111,23 @@ def _get_session_memory() -> Optional[SessionMemory]:
             max_turns=runtime_cfg.get("session_memory_max_turns", 6),
         )
     return SESSION_MEMORY
+
+
+def _get_provider_registry() -> ProviderRegistry:
+    global PROVIDER_REGISTRY
+    if PROVIDER_REGISTRY is None:
+        PROVIDER_REGISTRY = build_default_provider_registry(_get_config())
+    return PROVIDER_REGISTRY
+
+
+def _is_provider_configured(provider_id: str) -> bool:
+    provider = _get_provider_registry().get(provider_id)
+    return bool(provider is not None and provider.configured)
+
+
+def _known_providers_text() -> str:
+    providers = _get_provider_registry().list_provider_ids()
+    return "|".join(providers)
 
 
 def _normalize_ask_options(
@@ -619,6 +638,40 @@ async def ask_ollama(
 
 
 @mcp.tool()
+async def ask_claude_code(
+    prompt: str,
+    save_path: str = None,
+    force_model: bool = False,
+    timeout_seconds: float | None = None,
+    max_output_tokens: int | None = None,
+    response_format: str | None = None,
+    verbosity: str | None = None,
+    stream: bool | None = None,
+) -> str:
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    )
+    if not _is_provider_configured("claude_code"):
+        return _finalize_response(
+            "[PROVIDER ERROR] 'claude_code' is not configured in commands. "
+            "Add commands.claude_code.exec/health in config to enable it.",
+            "claude_code",
+            options,
+        )
+    response = await _execute_failover_with_timeout(
+        "claude_code",
+        "codex",
+        prompt,
+        "analysis",
+        force_primary=force_model,
+        allow_tertiary=True,
+        timeout_seconds=options["timeout_seconds"],
+    )
+    response = _save_if_requested(response, save_path, tool_name="ask_claude_code")
+    return _finalize_response(response, "claude_code", options)
+
+
+@mcp.tool()
 async def ask(
     prompt: str,
     provider: str = "auto",
@@ -692,9 +745,20 @@ async def ask(
             verbosity=options["verbosity"],
             stream=options["stream"],
         )
+    elif normalized_provider == "claude_code":
+        raw = await ask_claude_code(
+            effective_prompt,
+            save_path=save_path,
+            force_model=force_model,
+            timeout_seconds=options["timeout_seconds"],
+            max_output_tokens=options["max_output_tokens"],
+            response_format=options["response_format"],
+            verbosity=options["verbosity"],
+            stream=options["stream"],
+        )
     else:
         return _finalize_response(
-            f"[PROVIDER ERROR] Unknown provider '{provider}'. Use: auto|codex|gemini|ollama",
+            f"[PROVIDER ERROR] Unknown provider '{provider}'. Use: auto|{_known_providers_text()}",
             normalized_provider,
             options,
         )

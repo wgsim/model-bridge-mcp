@@ -64,3 +64,4 @@ runtime:
     codex: true
     gemini: true
     ollama: false
+    claude_code: false
