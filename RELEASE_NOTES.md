@@ -1,5 +1,19 @@
 # Release Notes
 
+## v0.1.3 - 2026-02-11
+
+### Summary
+- Added Phase 3 external orchestrator parallelism policy and capability visibility.
+
+### Highlights
+- Added new MCP tool:
+  - `list_orchestrator_capabilities()`
+- Added orchestrator capability policy document:
+  - `docs/skills/orchestrator-parallel-policy.md`
+- Updated README with orchestrator capability guidance.
+- Added unit test:
+  - `tests/unit/test_main_orchestrator_capabilities.py`
+
 ## v0.1.2 - 2026-02-11
 
 ### Summary

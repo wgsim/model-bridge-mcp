@@ -1065,6 +1065,34 @@ def list_provider_models(provider: str = "all") -> str:
     )
 
 
+@mcp.tool()
+def list_orchestrator_capabilities() -> str:
+    payload = {
+        "status": "ok",
+        "recommended_policy": {
+            "default_execution_mode": "single_mcp_call",
+            "parallel_execution_owner": "mcp_internal",
+            "rationale": "Keep behavior deterministic regardless of client-side parallel orchestration support."
+        },
+        "orchestrators": {
+            "codex": {
+                "external_parallel_tool_calls": "assume_limited",
+                "guidance": "Prefer one MCP call and use ask_batch(mode=parallel) for fan-out."
+            },
+            "gemini": {
+                "external_parallel_tool_calls": "assume_limited",
+                "guidance": "Prefer one MCP call and use ask_batch(mode=parallel) for fan-out."
+            },
+            "claude_code": {
+                "external_parallel_tool_calls": "possible",
+                "guidance": "Still prefer MCP-internal orchestration for stable cross-client behavior."
+            }
+        },
+        "fallback_rule": "If external parallel behavior is unclear, route all fan-out through ask_batch.",
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def run() -> None:
     mcp.run()
 

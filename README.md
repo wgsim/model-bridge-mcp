@@ -204,6 +204,17 @@ Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code")` to in
   - `claude_code`: `haiku`, `sonnet`, `opus`
 - Note: some Gemini preview models may require additional internal flags/account enablement.
 
+## Orchestrator Capability Tool
+Use `list_orchestrator_capabilities()` to inspect external orchestrator assumptions and the recommended execution policy.
+
+- Recommended default: one MCP call + internal fan-out via `ask_batch(mode="parallel")`
+- Capability matrix included for:
+  - `codex`
+  - `gemini`
+  - `claude_code`
+- Fallback rule:
+  - if external parallel behavior is uncertain, use MCP-internal parallel orchestration
+
 Telemetry note:
 - `model_bridge.telemetry` logs structured events to stderr.
 - Current fields include `request_id`, `routing_tier`, `status`, `error_category`, and `latency_ms`.
