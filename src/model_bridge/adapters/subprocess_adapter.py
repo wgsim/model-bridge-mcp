@@ -43,9 +43,15 @@ class SubprocessAdapter(CLIAdapter):
             full_input = input_text
         full_cmd = cmd_base + list(args)
         stdin_input = full_input
-        # Providers using `-p/--prompt` expect the prompt as a CLI argument.
-        if service_name in {"gemini", "claude_code"} and any(
-            flag in cmd_base for flag in ("-p", "--prompt")
+        # Gemini expects prompt value immediately after -p/--prompt.
+        if service_name == "gemini" and any(flag in cmd_base for flag in ("-p", "--prompt")):
+            prompt_flag = "-p" if "-p" in cmd_base else "--prompt"
+            idx = full_cmd.index(prompt_flag)
+            full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
+            stdin_input = ""
+        # Claude print mode uses positional prompt.
+        elif service_name == "claude_code" and any(
+            flag in cmd_base for flag in ("-p", "--print")
         ):
             full_cmd = full_cmd + [full_input]
             stdin_input = ""

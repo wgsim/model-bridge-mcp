@@ -234,6 +234,34 @@ def test_run_passes_prompt_as_argument_for_gemini_p_mode():
     assert run_mock.call_args.kwargs["input"] == ""
 
 
+def test_run_places_gemini_prompt_before_model_flag_args():
+    adapter = SubprocessAdapter(
+        {"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}},
+        system_suffix=" [suffix]",
+    )
+    completed = subprocess.CompletedProcess(
+        args=["gemini", "-p", "hello [suffix]", "--model", "gemini-2.5-pro"],
+        returncode=0,
+        stdout="ok\n",
+        stderr="",
+    )
+    with patch("shutil.which", return_value="/usr/bin/gemini"), patch(
+        "subprocess.run", return_value=completed
+    ) as run_mock:
+        ok, output = adapter.run("gemini", ["--model", "gemini-2.5-pro"], "hello")
+
+    assert ok is True
+    assert output == "ok"
+    assert run_mock.call_args.args[0] == [
+        "gemini",
+        "-p",
+        "hello [suffix]",
+        "--model",
+        "gemini-2.5-pro",
+    ]
+    assert run_mock.call_args.kwargs["input"] == ""
+
+
 def test_run_passes_prompt_as_argument_for_claude_p_mode():
     adapter = SubprocessAdapter(
         {"claude_code": {"exec": ["claude", "-p"], "health": ["claude", "--version"]}},
