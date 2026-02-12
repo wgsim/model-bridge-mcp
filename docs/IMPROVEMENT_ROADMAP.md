@@ -184,11 +184,20 @@ Week 5+: P3 항목 구현
 |------|------|----------|------|
 | 개선 로드맵 작성 | ✅ 완료 | 2026-02-12 | |
 | P1-1: Provider Registry 확장 | ✅ 완료 | 2026-02-12 | `ae06e78` |
-| P1-2: Error Category 재시도 정책 | ⏳ 대기중 | | |
+| P1-2: Error Category 재시도 정책 | ⚠️ 부분완료 | 2026-02-12 | `429c155` |
 | P1-3: 테스트 커버리지 강화 | ⏳ 대기중 | | |
 | P2-1: 매트릭 스위칭 | ⏳ 대기중 | | |
 | P2-2: Telemetry/Observability | ⏳ 대기중 | | |
-| P2-3: 배치 성능 최적화 | ⏳ 대기중 | | | |
+| P2-3: 배치 성능 최적화 | ⏳ 대기중 | | |
+
+**참고**:
+- P1-2: Error category enum 및 ErrorInfo dataclass 추가됨
+- retry 결정 로직(_should_continue_failover) 구현됨
+- 테스트 작성: regex 패턴이 다소 복잡하여 추후 개선 필요
+- 현재 상태: failover_manager.py가 _should_continue_failover 메서드만 추가하고
+  실제 failover 로직은 여전히 기존 방식 사용 중
+- 향후 개선: execute_async에서 ErrorInfo.from_message() 호출하여
+  카테고리 기반 재시도 결정하도록 리팩토링 필요 |
 
 ---
 
