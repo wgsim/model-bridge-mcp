@@ -97,6 +97,8 @@ class AskDefaultsConfig(BaseModel):
     response_format: str = Field(default="text")
     verbosity: str = Field(default="normal")
     stream: bool = False
+    instruction_preset: str = Field(default="strict_once")
+    output_mode: str = Field(default="clean")
 
     @model_validator(mode="after")
     def validate_enums(self) -> "AskDefaultsConfig":
@@ -106,6 +108,12 @@ class AskDefaultsConfig(BaseModel):
             raise ValueError(
                 "runtime.ask_defaults.verbosity must be one of: brief, normal, detailed"
             )
+        if self.instruction_preset not in {"none", "strict_once"}:
+            raise ValueError(
+                "runtime.ask_defaults.instruction_preset must be one of: none, strict_once"
+            )
+        if self.output_mode not in {"clean", "raw"}:
+            raise ValueError("runtime.ask_defaults.output_mode must be one of: clean, raw")
         return self
 
 

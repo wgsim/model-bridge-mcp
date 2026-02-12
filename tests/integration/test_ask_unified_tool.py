@@ -73,6 +73,37 @@ def test_ask_unified_forwards_output_mode_to_provider(monkeypatch):
     assert captured["output_mode"] == "raw"
 
 
+def test_ask_unified_uses_runtime_default_output_mode_when_omitted(monkeypatch):
+    captured = {}
+
+    async def _fake_codex_capture(*args, **kwargs):
+        captured["output_mode"] = kwargs.get("output_mode")
+        return "codex-result"
+
+    monkeypatch.setattr(main_module, "ask_chatgpt_cli", _fake_codex_capture)
+    monkeypatch.setattr(
+        main_module,
+        "_get_config",
+        lambda: {
+            "runtime": {
+                "ask_defaults": {
+                    "timeout_seconds": 120,
+                    "max_output_tokens": 0,
+                    "response_format": "text",
+                    "verbosity": "normal",
+                    "stream": False,
+                    "instruction_preset": "none",
+                    "output_mode": "raw",
+                }
+            }
+        },
+    )
+
+    out = asyncio.run(main_module.ask("hello", provider="codex"))
+    assert out == "codex-result"
+    assert captured["output_mode"] == "raw"
+
+
 def test_ask_unified_json_response(monkeypatch):
     monkeypatch.setattr(main_module, "ask_gemini_cli", _fake_gemini)
     out = asyncio.run(main_module.ask("hello", provider="gemini", response_format="json"))

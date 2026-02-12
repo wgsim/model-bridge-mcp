@@ -73,6 +73,8 @@ runtime:
     response_format: "text"
     verbosity: "normal"
     stream: false
+    instruction_preset: "strict_once"
+    output_mode: "clean"
   prompt_cache_enabled: true
   prompt_cache_ttl_seconds: 300
   prompt_cache_max_entries: 256

@@ -140,6 +140,38 @@ def test_ask_applies_instruction_preset_before_dispatch(monkeypatch):
     assert "Output valid JSON only." in captured["prompt"]
 
 
+def test_ask_uses_runtime_default_instruction_preset_when_omitted(monkeypatch):
+    captured = {}
+
+    async def _fake_codex(prompt, **kwargs):
+        captured["prompt"] = prompt
+        return "ok"
+
+    monkeypatch.setattr(main_module, "ask_chatgpt_cli", _fake_codex)
+    monkeypatch.setattr(
+        main_module,
+        "_get_config",
+        lambda: {
+            "runtime": {
+                "ask_defaults": {
+                    "timeout_seconds": 120,
+                    "max_output_tokens": 0,
+                    "response_format": "text",
+                    "verbosity": "normal",
+                    "stream": False,
+                    "instruction_preset": "strict_once",
+                    "output_mode": "clean",
+                }
+            }
+        },
+    )
+
+    out = asyncio.run(main_module.ask("final task", provider="codex"))
+
+    assert out == "ok"
+    assert "[MCP EXECUTION POLICY]" in captured["prompt"]
+
+
 def test_list_prompt_execution_policy_contract():
     payload = json.loads(main_module.list_prompt_execution_policy())
 

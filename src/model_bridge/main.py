@@ -214,6 +214,23 @@ def _normalize_output_mode(output_mode: str | None) -> str:
     return resolved
 
 
+def _resolve_instruction_preset(instruction_preset: str | None) -> str:
+    defaults = _get_runtime_defaults()
+    token = instruction_preset if instruction_preset is not None else defaults.get(
+        "instruction_preset", "strict_once"
+    )
+    preset = (token or "none").strip().lower()
+    if preset not in {"none", "strict_once"}:
+        raise ValueError("instruction_preset must be one of: none, strict_once")
+    return preset
+
+
+def _resolve_output_mode(output_mode: str | None) -> str:
+    defaults = _get_runtime_defaults()
+    token = output_mode if output_mode is not None else defaults.get("output_mode", "clean")
+    return _normalize_output_mode(token)
+
+
 def _apply_verbosity(text: str, verbosity: str) -> str:
     if verbosity == "brief":
         return text[:600].rstrip()
@@ -1014,18 +1031,19 @@ async def ask(
     verbosity: str | None = None,
     stream: bool | None = None,
     session_id: str | None = None,
-    instruction_preset: str = "none",
-    output_mode: str = "clean",
+    instruction_preset: str | None = None,
+    output_mode: str | None = None,
 ) -> str:
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    normalized_output_mode = _normalize_output_mode(output_mode)
+    normalized_output_mode = _resolve_output_mode(output_mode)
+    normalized_instruction_preset = _resolve_instruction_preset(instruction_preset)
     requested_provider = (provider or "auto").strip().lower()
     normalized_provider = "codex" if requested_provider == "auto" else requested_provider
     effective_prompt = _build_prompt_with_session(prompt, session_id)
     effective_prompt = _apply_instruction_preset(
-        effective_prompt, instruction_preset, options["response_format"]
+        effective_prompt, normalized_instruction_preset, options["response_format"]
     )
 
     cache = _get_prompt_cache()
@@ -1039,6 +1057,7 @@ async def ask(
                 "force_model": force_model,
                 "options": json.dumps(options, sort_keys=True),
                 "output_mode": normalized_output_mode,
+                "instruction_preset": normalized_instruction_preset,
             }
         )
         cached = cache.get(cache_key)
@@ -1087,12 +1106,14 @@ async def ask_batch(
     verbosity: str | None = None,
     stream: bool | None = None,
     session_id: str | None = None,
-    instruction_preset: str = "none",
-    output_mode: str = "clean",
+    instruction_preset: str | None = None,
+    output_mode: str | None = None,
 ) -> str:
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
+    normalized_output_mode = _resolve_output_mode(output_mode)
+    normalized_instruction_preset = _resolve_instruction_preset(instruction_preset)
     normalized_mode = (mode or "sequential").strip().lower()
     if normalized_mode not in {"sequential", "parallel"}:
         return json.dumps(
@@ -1141,8 +1162,8 @@ async def ask_batch(
                 verbosity=options["verbosity"],
                 stream=options["stream"],
                 session_id=job_session_id,
-                instruction_preset=instruction_preset,
-                output_mode=output_mode,
+                instruction_preset=normalized_instruction_preset,
+                output_mode=normalized_output_mode,
             )
             duration_ms = int((time.perf_counter() - started) * 1000)
             return {
@@ -1321,8 +1342,13 @@ def list_cli_noninteractive_policy() -> str:
 
 @mcp.tool()
 def list_prompt_execution_policy() -> str:
+    defaults = _get_runtime_defaults()
     payload = {
         "status": "ok",
+        "runtime_defaults": {
+            "instruction_preset": defaults.get("instruction_preset", "strict_once"),
+            "output_mode": defaults.get("output_mode", "clean"),
+        },
         "instruction_presets": {
             "none": {
                 "description": "No additional execution policy block is injected."
@@ -1336,7 +1362,7 @@ def list_prompt_execution_policy() -> str:
                 },
             },
         },
-        "guidance": "For deterministic orchestration, pass instruction_preset='strict_once' explicitly.",
+        "guidance": "Set runtime.ask_defaults to avoid repeating these args in every MCP call.",
     }
     return json.dumps(payload, ensure_ascii=False)
 

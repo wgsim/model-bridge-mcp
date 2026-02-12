@@ -260,6 +260,12 @@ Output cleanliness option:
 - `output_mode="clean"` (default): strip known CLI startup/log noise lines from provider output.
 - `output_mode="raw"`: keep original provider output (including startup/log lines).
 
+Default policy without repeating args:
+- Configure once in `runtime.ask_defaults`:
+  - `instruction_preset: "strict_once"`
+  - `output_mode: "clean"`
+- Then `ask(...)` / `ask_batch(...)` automatically apply these when args are omitted.
+
 Telemetry note:
 - `model_bridge.telemetry` logs structured events to stderr.
 - Current fields include `request_id`, `routing_tier`, `status`, `error_category`, and `latency_ms`.
