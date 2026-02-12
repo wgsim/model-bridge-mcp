@@ -117,8 +117,21 @@ def _get_session_memory() -> Optional[SessionMemory]:
 def _get_provider_registry() -> ProviderRegistry:
     global PROVIDER_REGISTRY
     if PROVIDER_REGISTRY is None:
-        PROVIDER_REGISTRY = build_default_provider_registry(_get_config())
+        PROVIDER_REGISTRY = build_default_provider_registry(
+            _get_config(),
+            handlers=_get_provider_handlers(),
+        )
     return PROVIDER_REGISTRY
+
+
+def _get_provider_handlers() -> dict[str, Callable]:
+    """Get provider handler mappings for registry."""
+    return {
+        "codex": ask_chatgpt_cli,
+        "gemini": ask_gemini_cli,
+        "ollama": ask_ollama,
+        "claude_code": ask_claude_code,
+    }
 
 
 def _is_provider_configured(provider_id: str) -> bool:
@@ -131,15 +144,6 @@ def _known_providers_text() -> str:
     return "|".join(providers)
 
 
-def _get_provider_dispatchers():
-    return {
-        "codex": ask_chatgpt_cli,
-        "gemini": ask_gemini_cli,
-        "ollama": ask_ollama,
-        "claude_code": ask_claude_code,
-    }
-
-
 async def _dispatch_ask_provider(
     provider_id: str,
     prompt: str,
@@ -150,10 +154,27 @@ async def _dispatch_ask_provider(
     options: dict,
     output_mode: str,
 ) -> str:
-    dispatchers = _get_provider_dispatchers()
-    handler = dispatchers.get(provider_id)
+    registry = _get_provider_registry()
+    handler = registry.get_handler(provider_id)
     if handler is None:
-        raise ValueError(f"provider dispatcher not found: {provider_id}")
+        known = registry.list_provider_ids()
+        known_str = "|".join(known)
+        raise ValueError(f"provider dispatcher not found: {provider_id}. Known providers: {known_str}")
+
+    # Capability validation
+    _, json_error = registry.validate_option(provider_id, "response_format", options["response_format"])
+    if json_error:
+        return json_error
+
+    _, stream_error = registry.validate_option(provider_id, "stream", options["stream"])
+    if stream_error:
+        # Streaming not supported - will degrade to non-stream
+        logger.info("Provider %s does not support streaming, degrading: %s", provider_id, stream_error)
+
+    _, force_model_error = registry.validate_option(provider_id, "force_model", force_model)
+    if force_model_error:
+        return force_model_error
+
     common_kwargs = {
         "save_path": save_path,
         "timeout_seconds": options["timeout_seconds"],
@@ -163,6 +184,7 @@ async def _dispatch_ask_provider(
         "stream": options["stream"],
         "output_mode": output_mode,
     }
+
     if provider_id == "ollama":
         return await handler(
             prompt,
