@@ -1,5 +1,43 @@
 # Release Notes
 
+## v0.1.5 - 2026-02-12
+
+### Summary
+- Completed Phase 3 ask UX/efficiency rollout and added deterministic prompt/output policy defaults for MCP use.
+
+### Highlights
+- Added actionable failover metadata expansion:
+  - `primary_error`
+  - `secondary_error`
+  - `tertiary_error`
+- Added CLI startup/trust diagnostics tool:
+  - `list_cli_noninteractive_policy()`
+- Added prompt policy visibility tool:
+  - `list_prompt_execution_policy()`
+- Added ask policy controls:
+  - `instruction_preset` (`none|strict_once`)
+  - `output_mode` (`clean|raw`)
+- Added runtime defaults to avoid repeating args in every MCP call:
+  - `runtime.ask_defaults.instruction_preset`
+  - `runtime.ask_defaults.output_mode`
+- Added known startup/log noise filtering in clean mode for provider outputs.
+
+### Tests Added/Updated
+- Updated:
+  - `tests/unit/test_failover_failure_metadata.py`
+  - `tests/unit/test_failover_manager.py`
+  - `tests/unit/test_subprocess_adapter.py`
+  - `tests/unit/test_main_helpers.py`
+  - `tests/unit/test_main_ask_batch.py`
+  - `tests/unit/test_main_ask_options.py`
+  - `tests/integration/test_ask_unified_tool.py`
+
+### Verification Snapshot
+- `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests'`
+- Result: `124 passed`
+- `conda run -n model-bridge-mcp_dev pre-commit run --all-files`
+- Result: `Passed`
+
 ## v0.1.4 - 2026-02-11
 
 ### Summary

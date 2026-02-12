@@ -195,3 +195,23 @@ Migrate monolithic allocator scripts (`archive/coder_ai_allocator_v1.0.py`, `arc
 
 ## Phase 3 Plan
 - Implementation plan: `docs/plans/2026-02-10-phase3-ask-ux-efficiency-plan.md`
+- Completion status (2026-02-12):
+  - [x] Task 1: Standardized common ask options.
+  - [x] Task 2: Added actionable failure metadata (`why_failed`, `next_action`) and tier-level errors (`primary_error`, `secondary_error`, `tertiary_error`).
+  - [x] Task 3: Added unified `ask` endpoint.
+  - [x] Task 4: Added auto model routing policy.
+  - [x] Task 5: Added bounded TTL prompt cache.
+  - [x] Task 6: Added optional streaming mode.
+  - [x] Task 7: Added optional session context memory.
+  - [x] Extended Phase 3 operability:
+    - `list_orchestrator_capabilities()`
+    - `list_runtime_resources()`
+    - `list_cli_noninteractive_policy()`
+    - `list_prompt_execution_policy()`
+    - `ask/ask_batch` policy controls (`instruction_preset`, `output_mode`)
+    - runtime defaults via `runtime.ask_defaults.instruction_preset` / `runtime.ask_defaults.output_mode`
+
+## Latest Verification Snapshot
+- Date: 2026-02-12
+- `conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests'` -> `124 passed`
+- `conda run -n model-bridge-mcp_dev pre-commit run --all-files` -> `Passed`
