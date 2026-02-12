@@ -148,6 +148,7 @@ async def _dispatch_ask_provider(
     force_model: bool,
     model: str,
     options: dict,
+    output_mode: str,
 ) -> str:
     dispatchers = _get_provider_dispatchers()
     handler = dispatchers.get(provider_id)
@@ -160,6 +161,7 @@ async def _dispatch_ask_provider(
         "response_format": options["response_format"],
         "verbosity": options["verbosity"],
         "stream": options["stream"],
+        "output_mode": output_mode,
     }
     if provider_id == "ollama":
         return await handler(
@@ -202,6 +204,13 @@ def _normalize_ask_options(
         raise ValueError("timeout_seconds must be > 0")
     if resolved["max_output_tokens"] < 0:
         raise ValueError("max_output_tokens must be >= 0")
+    return resolved
+
+
+def _normalize_output_mode(output_mode: str | None) -> str:
+    resolved = (output_mode or "clean").strip().lower()
+    if resolved not in {"clean", "raw"}:
+        raise ValueError("output_mode must be one of: clean, raw")
     return resolved
 
 
@@ -267,6 +276,32 @@ def _build_prompt_with_session(prompt: str, session_id: str | None) -> str:
         return prompt
     context = "\n".join(f"- {item}" for item in history)
     return f"[Session Context]\n{context}\n\n[User Prompt]\n{prompt}"
+
+
+def _apply_instruction_preset(
+    prompt: str,
+    instruction_preset: str | None,
+    response_format: str,
+) -> str:
+    preset = (instruction_preset or "none").strip().lower()
+    if preset == "none":
+        return prompt
+    if preset == "strict_once":
+        json_rule = (
+            "5) Output valid JSON only."
+            if response_format == "json"
+            else "5) Output plain text only."
+        )
+        policy = (
+            "[MCP EXECUTION POLICY]\n"
+            "1) Complete the task in a single response.\n"
+            "2) Do not ask follow-up questions.\n"
+            "3) If information is missing, proceed with minimal assumptions and label each as 'Assumption'.\n"
+            "4) Follow all user constraints exactly.\n"
+            f"{json_rule}\n"
+        )
+        return f"{policy}\n[User Prompt]\n{prompt}"
+    raise ValueError("instruction_preset must be one of: none, strict_once")
 
 
 def _remember_session_turn(session_id: str | None, prompt: str, response: str) -> None:
@@ -562,21 +597,27 @@ def _resolve_fallback_chain(requested_model: str) -> list[str]:
     return ordered
 
 
-async def _run_ollama_with_timeout(model_name: str, prompt: str, timeout_seconds: float) -> tuple[bool, str]:
+async def _run_ollama_with_timeout(
+    model_name: str,
+    prompt: str,
+    timeout_seconds: float,
+    output_mode: str = "clean",
+) -> tuple[bool, str]:
     adapter = _get_adapter()
     run_async = adapter.run_async
     params = inspect.signature(run_async).parameters
     supports_timeout = "timeout_seconds" in params or any(
         param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
     )
+    supports_strip_noise = "strip_noise" in params or any(
+        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
+    )
+    kwargs: dict[str, object] = {}
     if supports_timeout:
-        return await run_async(
-            "ollama",
-            [model_name],
-            prompt,
-            timeout_seconds=timeout_seconds,
-        )
-    return await run_async("ollama", [model_name], prompt)
+        kwargs["timeout_seconds"] = timeout_seconds
+    if supports_strip_noise:
+        kwargs["strip_noise"] = output_mode != "raw"
+    return await run_async("ollama", [model_name], prompt, **kwargs)
 
 
 async def _execute_failover_with_timeout(
@@ -589,6 +630,7 @@ async def _execute_failover_with_timeout(
     allow_tertiary: bool = True,
     timeout_seconds: float,
     provider_args: dict[str, list[str]] | None = None,
+    output_mode: str = "clean",
 ) -> str:
     failover = _get_failover()
     execute_async = failover.execute_async
@@ -599,11 +641,16 @@ async def _execute_failover_with_timeout(
     supports_provider_args = "provider_args" in params or any(
         param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
     )
+    supports_output_mode = "output_mode" in params or any(
+        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
+    )
     kwargs: dict[str, object] = {}
     if supports_timeout:
         kwargs["timeout_seconds"] = timeout_seconds
     if supports_provider_args and provider_args is not None:
         kwargs["provider_args"] = provider_args
+    if supports_output_mode:
+        kwargs["output_mode"] = output_mode
     return await execute_async(
         primary,
         secondary,
@@ -745,10 +792,12 @@ async def ask_chatgpt_cli(
     response_format: str | None = None,
     verbosity: str | None = None,
     stream: bool | None = None,
+    output_mode: str = "clean",
 ) -> str:
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
+    normalized_output_mode = _normalize_output_mode(output_mode)
     response = ""
     for trial_model in _build_provider_model_trials("codex", model):
         provider_args = (
@@ -765,6 +814,7 @@ async def ask_chatgpt_cli(
             allow_tertiary=True,
             timeout_seconds=options["timeout_seconds"],
             provider_args=provider_args,
+            output_mode=normalized_output_mode,
         )
         if not _is_task_execution_failed(response):
             break
@@ -785,10 +835,12 @@ async def ask_gemini_cli(
     response_format: str | None = None,
     verbosity: str | None = None,
     stream: bool | None = None,
+    output_mode: str = "clean",
 ) -> str:
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
+    normalized_output_mode = _normalize_output_mode(output_mode)
     response = ""
     for trial_model in _build_provider_model_trials("gemini", model):
         provider_args = (
@@ -805,6 +857,7 @@ async def ask_gemini_cli(
             allow_tertiary=True,
             timeout_seconds=options["timeout_seconds"],
             provider_args=provider_args,
+            output_mode=normalized_output_mode,
         )
         if not _is_task_execution_failed(response):
             break
@@ -824,6 +877,7 @@ async def ask_ollama(
     response_format: str | None = None,
     verbosity: str | None = None,
     stream: bool | None = None,
+    output_mode: str = "clean",
 ) -> str:
     effective_timeout = timeout_seconds
     if effective_timeout is None:
@@ -832,6 +886,7 @@ async def ask_ollama(
     options = _normalize_ask_options(
         effective_timeout, max_output_tokens, response_format, verbosity, stream
     )
+    normalized_output_mode = _normalize_output_mode(output_mode)
     is_safe, sec_msg = SecuritySanitizer.inspect(prompt, mode="execution")
     if not is_safe:
         return _finalize_response(sec_msg, "ollama", options)
@@ -870,7 +925,7 @@ async def ask_ollama(
     last_local_error = ""
     for local_model in local_chain:
         success, output = await _run_ollama_with_timeout(
-            local_model, prompt, options["timeout_seconds"]
+            local_model, prompt, options["timeout_seconds"], output_mode=normalized_output_mode
         )
         if success:
             response = f"[Source: Ollama]\n{output}"
@@ -890,6 +945,7 @@ async def ask_ollama(
         force_primary=False,
         allow_tertiary=False,
         timeout_seconds=options["timeout_seconds"],
+        output_mode=normalized_output_mode,
     )
     response = _save_if_requested(response, save_path, tool_name="ask_ollama")
     return _finalize_response(response, "ollama", options)
@@ -906,10 +962,12 @@ async def ask_claude_code(
     response_format: str | None = None,
     verbosity: str | None = None,
     stream: bool | None = None,
+    output_mode: str = "clean",
 ) -> str:
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
+    normalized_output_mode = _normalize_output_mode(output_mode)
     if not _is_provider_configured("claude_code"):
         return _finalize_response(
             "[PROVIDER ERROR] 'claude_code' is not configured in commands. "
@@ -933,6 +991,7 @@ async def ask_claude_code(
             allow_tertiary=True,
             timeout_seconds=options["timeout_seconds"],
             provider_args=provider_args,
+            output_mode=normalized_output_mode,
         )
         if not _is_task_execution_failed(response):
             break
@@ -955,13 +1014,19 @@ async def ask(
     verbosity: str | None = None,
     stream: bool | None = None,
     session_id: str | None = None,
+    instruction_preset: str = "none",
+    output_mode: str = "clean",
 ) -> str:
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
+    normalized_output_mode = _normalize_output_mode(output_mode)
     requested_provider = (provider or "auto").strip().lower()
     normalized_provider = "codex" if requested_provider == "auto" else requested_provider
     effective_prompt = _build_prompt_with_session(prompt, session_id)
+    effective_prompt = _apply_instruction_preset(
+        effective_prompt, instruction_preset, options["response_format"]
+    )
 
     cache = _get_prompt_cache()
     cache_key = None
@@ -973,6 +1038,7 @@ async def ask(
                 "prompt": effective_prompt,
                 "force_model": force_model,
                 "options": json.dumps(options, sort_keys=True),
+                "output_mode": normalized_output_mode,
             }
         )
         cached = cache.get(cache_key)
@@ -997,6 +1063,7 @@ async def ask(
         force_model=force_model,
         model=model,
         options=options,
+        output_mode=normalized_output_mode,
     )
 
     if cache is not None and cache_key is not None:
@@ -1020,6 +1087,8 @@ async def ask_batch(
     verbosity: str | None = None,
     stream: bool | None = None,
     session_id: str | None = None,
+    instruction_preset: str = "none",
+    output_mode: str = "clean",
 ) -> str:
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
@@ -1072,6 +1141,8 @@ async def ask_batch(
                 verbosity=options["verbosity"],
                 stream=options["stream"],
                 session_id=job_session_id,
+                instruction_preset=instruction_preset,
+                output_mode=output_mode,
             )
             duration_ms = int((time.perf_counter() - started) * 1000)
             return {
@@ -1244,6 +1315,28 @@ def list_cli_noninteractive_policy() -> str:
                 or "--print" in claude_exec,
             },
         },
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_prompt_execution_policy() -> str:
+    payload = {
+        "status": "ok",
+        "instruction_presets": {
+            "none": {
+                "description": "No additional execution policy block is injected."
+            },
+            "strict_once": {
+                "description": "Inject a fixed policy block for single-shot execution and assumption labeling.",
+                "recommended_for": ["ask", "ask_batch"],
+                "recommended_args": {
+                    "instruction_preset": "strict_once",
+                    "response_format": "json",
+                },
+            },
+        },
+        "guidance": "For deterministic orchestration, pass instruction_preset='strict_once' explicitly.",
     }
     return json.dumps(payload, ensure_ascii=False)
 

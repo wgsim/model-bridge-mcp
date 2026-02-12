@@ -16,6 +16,7 @@ class CLIAdapter(ABC):
         args: Sequence[str],
         input_text: str,
         timeout_seconds: float | None = None,
+        strip_noise: bool = True,
     ) -> Tuple[bool, str]:
         """Run service command and return (success, output)."""
 
@@ -26,5 +27,6 @@ class CLIAdapter(ABC):
         args: Sequence[str],
         input_text: str,
         timeout_seconds: float | None = None,
+        strip_noise: bool = True,
     ) -> Tuple[bool, str]:
         """Run service command asynchronously and return (success, output)."""

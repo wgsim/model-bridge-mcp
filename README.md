@@ -244,6 +244,22 @@ Use `list_cli_noninteractive_policy()` to inspect startup/trust prompt handling 
   - non-interactive path: `claude -p`
   - CLI help indicates workspace trust dialog is skipped in `-p` mode
 
+## Prompt Execution Policy Tool
+Use `list_prompt_execution_policy()` to inspect available prompt policy presets for `ask(...)` / `ask_batch(...)`.
+
+- Recommended deterministic call pattern:
+  - `instruction_preset="strict_once"`
+  - `response_format="json"`
+- `strict_once` injects a fixed policy block that enforces:
+  - single-response execution
+  - no follow-up questions
+  - explicit `Assumption` labeling when context is missing
+  - strict output format compliance
+
+Output cleanliness option:
+- `output_mode="clean"` (default): strip known CLI startup/log noise lines from provider output.
+- `output_mode="raw"`: keep original provider output (including startup/log lines).
+
 Telemetry note:
 - `model_bridge.telemetry` logs structured events to stderr.
 - Current fields include `request_id`, `routing_tier`, `status`, `error_category`, and `latency_ms`.

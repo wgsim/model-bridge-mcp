@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 from typing import Mapping, Sequence, Tuple
@@ -27,6 +28,26 @@ class SubprocessAdapter(CLIAdapter):
         self.system_suffix = system_suffix
         self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
         self.timeout_seconds = timeout_seconds
+
+    _NOISE_LINE_PATTERNS = (
+        re.compile(r"^Loaded cached credentials\.?$"),
+        re.compile(r"^Loading extension: .+$"),
+        re.compile(r"^Server '.+' supports tool updates\. Listening for changes\.\.\.$"),
+        re.compile(r"^Server '.+' supports resource updates\. Listening for changes\.\.\.$"),
+        re.compile(r"^Hook registry initialized with \d+ hook entries$"),
+    )
+
+    @classmethod
+    def _strip_known_noise_lines(cls, text: str) -> str:
+        if not text:
+            return text
+        cleaned_lines: list[str] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if any(pattern.fullmatch(stripped) for pattern in cls._NOISE_LINE_PATTERNS):
+                continue
+            cleaned_lines.append(line)
+        return "\n".join(cleaned_lines).strip()
 
     def _prepare_command(
         self, service_name: str, args: Sequence[str], input_text: str
@@ -104,6 +125,7 @@ class SubprocessAdapter(CLIAdapter):
         args: Sequence[str],
         input_text: str,
         timeout_seconds: float | None = None,
+        strip_noise: bool = True,
     ) -> Tuple[bool, str]:
         ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
         if not ok:
@@ -131,8 +153,14 @@ class SubprocessAdapter(CLIAdapter):
             return False, str(exc)
 
         if result.returncode == 0:
-            return True, result.stdout.strip()
-        return False, (result.stdout + result.stderr).strip()
+            output = result.stdout.strip()
+            if strip_noise:
+                output = self._strip_known_noise_lines(output)
+            return True, output
+        output = (result.stdout + result.stderr).strip()
+        if strip_noise:
+            output = self._strip_known_noise_lines(output)
+        return False, output
 
     async def run_async(
         self,
@@ -140,6 +168,7 @@ class SubprocessAdapter(CLIAdapter):
         args: Sequence[str],
         input_text: str,
         timeout_seconds: float | None = None,
+        strip_noise: bool = True,
     ) -> Tuple[bool, str]:
         ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
         if not ok:
@@ -173,5 +202,11 @@ class SubprocessAdapter(CLIAdapter):
         stdout = stdout_bytes.decode("utf-8", errors="replace")
         stderr = stderr_bytes.decode("utf-8", errors="replace")
         if proc.returncode == 0:
-            return True, stdout.strip()
-        return False, (stdout + stderr).strip()
+            output = stdout.strip()
+            if strip_noise:
+                output = self._strip_known_noise_lines(output)
+            return True, output
+        output = (stdout + stderr).strip()
+        if strip_noise:
+            output = self._strip_known_noise_lines(output)
+        return False, output

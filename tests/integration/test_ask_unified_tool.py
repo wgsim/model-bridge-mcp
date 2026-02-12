@@ -60,6 +60,19 @@ def test_ask_unified_forwards_model_to_codex_provider(monkeypatch):
     assert captured["model"] == "gpt-5"
 
 
+def test_ask_unified_forwards_output_mode_to_provider(monkeypatch):
+    captured = {}
+
+    async def _fake_codex_capture(*args, **kwargs):
+        captured["output_mode"] = kwargs.get("output_mode")
+        return "codex-result"
+
+    monkeypatch.setattr(main_module, "ask_chatgpt_cli", _fake_codex_capture)
+    out = asyncio.run(main_module.ask("hello", provider="codex", output_mode="raw"))
+    assert out == "codex-result"
+    assert captured["output_mode"] == "raw"
+
+
 def test_ask_unified_json_response(monkeypatch):
     monkeypatch.setattr(main_module, "ask_gemini_cli", _fake_gemini)
     out = asyncio.run(main_module.ask("hello", provider="gemini", response_format="json"))

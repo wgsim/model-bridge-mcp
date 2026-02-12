@@ -35,11 +35,22 @@ class FailoverManager:
         return f"{content}\n\n--- [Routing Log] ---\n" + "\n".join(routing)
 
     def _format_error(
-        self, routing: Sequence[str], msg: str, why_failed: str = "", next_action: str = ""
+        self,
+        routing: Sequence[str],
+        msg: str,
+        why_failed: str = "",
+        next_action: str = "",
+        errors_by_tier: dict[str, str] | None = None,
     ) -> str:
-        failure_meta = (
-            f"\n\n--- [Failure Metadata] ---\nwhy_failed: {why_failed}\nnext_action: {next_action}"
-        )
+        errors_by_tier = errors_by_tier or {}
+        failure_meta = "\n\n--- [Failure Metadata] ---\n"
+        failure_meta += f"why_failed: {why_failed}\nnext_action: {next_action}"
+        if errors_by_tier.get("primary"):
+            failure_meta += f"\nprimary_error: {errors_by_tier['primary']}"
+        if errors_by_tier.get("secondary"):
+            failure_meta += f"\nsecondary_error: {errors_by_tier['secondary']}"
+        if errors_by_tier.get("tertiary"):
+            failure_meta += f"\ntertiary_error: {errors_by_tier['tertiary']}"
         return (
             f"[Task Execution Failed]\n{msg}{failure_meta}\n\n--- [Routing Log] ---\n"
             + "\n".join(routing)
@@ -51,13 +62,24 @@ class FailoverManager:
         args: Sequence[str],
         input_text: str,
         timeout_seconds: float | None = None,
+        output_mode: str = "clean",
     ) -> tuple[bool, str]:
+        strip_noise = output_mode != "raw"
         try:
             return await self.adapter.run_async(
-                service_name, args, input_text, timeout_seconds=timeout_seconds
+                service_name,
+                args,
+                input_text,
+                timeout_seconds=timeout_seconds,
+                strip_noise=strip_noise,
             )
         except TypeError:
-            return await self.adapter.run_async(service_name, args, input_text)
+            try:
+                return await self.adapter.run_async(
+                    service_name, args, input_text, timeout_seconds=timeout_seconds
+                )
+            except TypeError:
+                return await self.adapter.run_async(service_name, args, input_text)
 
     def _emit_telemetry(
         self,
@@ -114,10 +136,14 @@ class FailoverManager:
         allow_tertiary: bool = True,
         timeout_seconds: float | None = None,
         provider_args: dict[str, Sequence[str]] | None = None,
+        output_mode: str = "clean",
     ) -> str:
         request_id = uuid.uuid4().hex
         start_ts = time.perf_counter()
         provider_args = provider_args or {}
+        if output_mode not in {"clean", "raw"}:
+            raise ValueError("output_mode must be one of: clean, raw")
+        errors_by_tier: dict[str, str] = {}
 
         ok, sec_msg = self.sanitizer.inspect(prompt, mode=mode)
         if not ok:
@@ -137,7 +163,11 @@ class FailoverManager:
 
         routing_log.append(f"[1] Primary ({primary}): Trying...")
         success, output = await self._run_adapter(
-            primary, provider_args.get(primary, []), prompt, timeout_seconds=timeout_seconds
+            primary,
+            provider_args.get(primary, []),
+            prompt,
+            timeout_seconds=timeout_seconds,
+            output_mode=output_mode,
         )
         if success:
             routing_log.append("    [SUCCESS]")
@@ -154,6 +184,7 @@ class FailoverManager:
             return self._format_response(output, routing_log)
 
         routing_log.append("    [FAILED]")
+        errors_by_tier["primary"] = output
         if force_primary:
             self._emit_telemetry(
                 request_id=request_id,
@@ -170,6 +201,7 @@ class FailoverManager:
                 f"Forced Primary ({primary}) failed.\nError: {output}",
                 why_failed="primary_failed_and_force_primary_enabled",
                 next_action=f"retry with force_primary=False or inspect {primary} availability",
+                errors_by_tier=errors_by_tier,
             )
 
         failover_prompt = f"[Context: {primary} failed] {prompt}"
@@ -179,6 +211,7 @@ class FailoverManager:
             provider_args.get(secondary, []),
             failover_prompt,
             timeout_seconds=timeout_seconds,
+            output_mode=output_mode,
         )
         if success:
             routing_log.append("    [SUCCESS]")
@@ -195,6 +228,7 @@ class FailoverManager:
             return self._format_response(output, routing_log)
 
         routing_log.append("    [FAILED]")
+        errors_by_tier["secondary"] = output
 
         if allow_tertiary and primary != "ollama":
             backup_model = self.config["models"]["ollama_final_backup_model"]
@@ -204,6 +238,7 @@ class FailoverManager:
                 list(provider_args.get("ollama", [])) or [backup_model],
                 failover_prompt,
                 timeout_seconds=timeout_seconds,
+                output_mode=output_mode,
             )
             if success:
                 routing_log.append("    [SUCCESS]")
@@ -219,6 +254,7 @@ class FailoverManager:
                 )
                 return self._format_response(output, routing_log)
             routing_log.append("    [FAILED]")
+            errors_by_tier["tertiary"] = output
 
         self._emit_telemetry(
             request_id=request_id,
@@ -235,4 +271,5 @@ class FailoverManager:
             f"All services failed. Last Error: {output}",
             why_failed="all_services_failed",
             next_action="verify cli health checks and retry",
+            errors_by_tier=errors_by_tier,
         )

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import time
 
@@ -102,3 +103,45 @@ def test_ask_unknown_provider_uses_registry_provider_list(monkeypatch):
     out = asyncio.run(main_module.ask("hello", provider="unknown-provider"))
 
     assert "auto|claude_code|codex|gemini|ollama" in out
+
+
+def test_apply_instruction_preset_strict_once_includes_policy_and_prompt():
+    out = main_module._apply_instruction_preset(
+        "do work",
+        "strict_once",
+        "json",
+    )
+
+    assert "[MCP EXECUTION POLICY]" in out
+    assert "Output valid JSON only." in out
+    assert "[User Prompt]\ndo work" in out
+
+
+def test_ask_applies_instruction_preset_before_dispatch(monkeypatch):
+    captured = {}
+
+    async def _fake_codex(prompt, **kwargs):
+        captured["prompt"] = prompt
+        return "ok"
+
+    monkeypatch.setattr(main_module, "ask_chatgpt_cli", _fake_codex)
+
+    out = asyncio.run(
+        main_module.ask(
+            "final task",
+            provider="codex",
+            instruction_preset="strict_once",
+            response_format="json",
+        )
+    )
+
+    assert out == "ok"
+    assert "[MCP EXECUTION POLICY]" in captured["prompt"]
+    assert "Output valid JSON only." in captured["prompt"]
+
+
+def test_list_prompt_execution_policy_contract():
+    payload = json.loads(main_module.list_prompt_execution_policy())
+
+    assert payload["status"] == "ok"
+    assert "strict_once" in payload["instruction_presets"]

@@ -298,3 +298,74 @@ def test_run_passes_prompt_as_argument_for_claude_p_mode():
     assert output == "ok"
     assert run_mock.call_args.args[0] == ["claude", "-p", "hello [suffix]"]
     assert run_mock.call_args.kwargs["input"] == ""
+
+
+def test_run_strips_known_gemini_startup_noise_lines():
+    adapter = SubprocessAdapter(
+        {"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}},
+    )
+    noisy_output = (
+        "Loaded cached credentials.\n"
+        "Loading extension: Stitch\n"
+        "Server 'playwriter@latest' supports tool updates. Listening for changes...\n"
+        "Server 'playwriter@latest' supports resource updates. Listening for changes...\n"
+        "Hook registry initialized with 0 hook entries\n"
+        "\n"
+        "OK\n"
+    )
+    completed = subprocess.CompletedProcess(
+        args=["gemini", "-p", "hello"],
+        returncode=0,
+        stdout=noisy_output,
+        stderr="",
+    )
+    with patch("shutil.which", return_value="/usr/bin/gemini"), patch(
+        "subprocess.run", return_value=completed
+    ):
+        ok, output = adapter.run("gemini", [], "hello")
+
+    assert ok is True
+    assert output == "OK"
+
+
+def test_run_keeps_regular_provider_output_lines():
+    adapter = SubprocessAdapter(
+        {"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}},
+    )
+    completed = subprocess.CompletedProcess(
+        args=["gemini", "-p", "hello"],
+        returncode=0,
+        stdout="first line\nsecond line\n",
+        stderr="",
+    )
+    with patch("shutil.which", return_value="/usr/bin/gemini"), patch(
+        "subprocess.run", return_value=completed
+    ):
+        ok, output = adapter.run("gemini", [], "hello")
+
+    assert ok is True
+    assert output == "first line\nsecond line"
+
+
+def test_run_raw_mode_keeps_startup_noise_lines():
+    adapter = SubprocessAdapter(
+        {"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}},
+    )
+    noisy_output = (
+        "Loaded cached credentials.\n"
+        "Hook registry initialized with 0 hook entries\n"
+        "OK\n"
+    )
+    completed = subprocess.CompletedProcess(
+        args=["gemini", "-p", "hello"],
+        returncode=0,
+        stdout=noisy_output,
+        stderr="",
+    )
+    with patch("shutil.which", return_value="/usr/bin/gemini"), patch(
+        "subprocess.run", return_value=completed
+    ):
+        ok, output = adapter.run("gemini", [], "hello", strip_noise=False)
+
+    assert ok is True
+    assert output == noisy_output.strip()

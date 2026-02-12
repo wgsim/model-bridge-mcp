@@ -126,6 +126,11 @@ def test_ask_gemini_cli_rejects_invalid_verbosity():
         asyncio.run(main_module.ask_gemini_cli("hi", verbosity="invalid"))
 
 
+def test_ask_rejects_invalid_output_mode():
+    with pytest.raises(ValueError, match="output_mode must be one of"):
+        asyncio.run(main_module.ask("hi", output_mode="invalid"))
+
+
 def test_ask_claude_code_supports_json_and_force_model(monkeypatch):
     fake_failover = _CaptureClaudeFailover()
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)

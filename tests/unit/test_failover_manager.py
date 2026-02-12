@@ -198,3 +198,30 @@ def test_execute_async_passes_provider_specific_args():
     assert adapter.calls[0] == ("codex", ["--model", "gpt-5"], "hello")
     assert adapter.calls[1][0] == "gemini"
     assert adapter.calls[1][1] == ["--model", "gemini-2.5-pro"]
+
+
+def test_execute_async_raw_mode_disables_noise_stripping():
+    class _CaptureStripNoiseAdapter:
+        def __init__(self):
+            self.flags = []
+
+        async def run_async(
+            self,
+            service_name,
+            args,
+            input_text,
+            timeout_seconds=None,
+            strip_noise=True,
+        ):
+            self.flags.append(strip_noise)
+            return True, "ok"
+
+    adapter = _CaptureStripNoiseAdapter()
+    manager = FailoverManager(adapter=adapter, sanitizer=_AllowAllSanitizer(), config=_base_config())
+
+    out = asyncio.run(
+        manager.execute_async("codex", "gemini", "hello", mode="execution", output_mode="raw")
+    )
+
+    assert "ok" in out
+    assert adapter.flags == [False]

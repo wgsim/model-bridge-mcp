@@ -27,3 +27,14 @@ def test_failover_error_contains_failure_metadata_block():
     assert "--- [Failure Metadata] ---" in out
     assert "why_failed:" in out
     assert "next_action:" in out
+    assert "primary_error: codex-failed" in out
+    assert "secondary_error: gemini-failed" in out
+
+
+def test_failover_error_contains_tertiary_error_when_enabled():
+    manager = FailoverManager(adapter=_AlwaysFailAdapter(), sanitizer=_AllowSanitizer(), config=_config())
+    out = manager.execute("codex", "gemini", "hello", mode="execution", allow_tertiary=True)
+
+    assert "primary_error: codex-failed" in out
+    assert "secondary_error: gemini-failed" in out
+    assert "tertiary_error: ollama-failed" in out

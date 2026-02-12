@@ -92,3 +92,47 @@ def test_ask_batch_clamps_ollama_parallelism(monkeypatch):
     assert '"requested_max_concurrency": 8' in out
     assert '"applied_max_concurrency": 1' in out
     assert '"concurrency_guard"' in out
+
+
+def test_ask_batch_forwards_instruction_preset(monkeypatch):
+    captured = []
+
+    async def _fake_ask(**kwargs):
+        captured.append(kwargs.get("instruction_preset"))
+        return "ok"
+
+    monkeypatch.setattr(main_module, "ask", _fake_ask)
+    monkeypatch.setattr(main_module, "time", type("_T", (), {"perf_counter": _FakeClock()})())
+
+    out = asyncio.run(
+        main_module.ask_batch(
+            prompts=["a", "b"],
+            mode="sequential",
+            instruction_preset="strict_once",
+        )
+    )
+
+    assert captured == ["strict_once", "strict_once"]
+    assert '"ok_jobs": 2' in out
+
+
+def test_ask_batch_forwards_output_mode(monkeypatch):
+    captured = []
+
+    async def _fake_ask(**kwargs):
+        captured.append(kwargs.get("output_mode"))
+        return "ok"
+
+    monkeypatch.setattr(main_module, "ask", _fake_ask)
+    monkeypatch.setattr(main_module, "time", type("_T", (), {"perf_counter": _FakeClock()})())
+
+    out = asyncio.run(
+        main_module.ask_batch(
+            prompts=["a", "b"],
+            mode="sequential",
+            output_mode="raw",
+        )
+    )
+
+    assert captured == ["raw", "raw"]
+    assert '"ok_jobs": 2' in out
