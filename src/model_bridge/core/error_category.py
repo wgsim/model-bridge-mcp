@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from re import match
+from re import search
 
 
 class ErrorCategory(Enum):
@@ -55,7 +55,7 @@ ERROR_PATTERNS = {
         r"host.?unreachable",
     ],
     ErrorCategory.MODEL_NOT_FOUND: [
-        r"model\s+\w+\s+not\s+(found|exist)"
+        r"model\s+[\w-]+\s+not\s+(found|exist)",
         r"unknown\s+model",
         r"invalid\s+model",
         r"no\s+such\s+model",
@@ -101,7 +101,7 @@ class ErrorInfo:
 
         for category, patterns in ERROR_PATTERNS.items():
             for pattern in patterns:
-                if match(pattern, low_msg):
+                if search(pattern, low_msg):
                     is_retryable = category in {
                         ErrorCategory.RATE_LIMITED,
                         ErrorCategory.TIMEOUT,
