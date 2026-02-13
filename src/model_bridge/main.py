@@ -1401,6 +1401,56 @@ def list_runtime_resources(model: str = "default", requested_max_concurrency: in
     return json.dumps(payload, ensure_ascii=False)
 
 
+@mcp.tool()
+def health_check() -> str:
+    """Check health status of model-bridge and available providers.
+
+    Returns:
+        JSON with health status, available providers, and system info.
+    """
+    import time
+
+    config = _get_config()
+    commands = config.get("commands", {})
+
+    # Check provider availability
+    providers_status = {}
+    for provider in ["codex", "gemini", "ollama", "claude_code"]:
+        cmd_config = commands.get(provider, {})
+        health_cmd = cmd_config.get("health", [])
+        if health_cmd:
+            try:
+                result = subprocess.run(
+                    health_cmd,
+                    capture_output=True,
+                    timeout=5,
+                )
+                providers_status[provider] = {
+                    "available": result.returncode == 0,
+                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            except Exception as e:
+                providers_status[provider] = {
+                    "available": False,
+                    "error": str(e),
+                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+        else:
+            providers_status[provider] = {"available": False, "error": "not configured"}
+
+    # Overall status
+    any_available = any(p.get("available", False) for p in providers_status.values())
+
+    payload = {
+        "status": "healthy" if any_available else "degraded",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "version": "0.1.4",
+        "providers": providers_status,
+    }
+
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def run() -> None:
     mcp.run()
 
