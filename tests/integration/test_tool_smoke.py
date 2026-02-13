@@ -44,6 +44,8 @@ def _fake_config():
 
 def test_ask_chatgpt_cli_smoke(monkeypatch):
     monkeypatch.setattr(main_module, "_get_failover", lambda: _FakeFailover())
+    # Ensure weighted routing returns None to use default provider
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: None)
     result = asyncio.run(main_module.ask_chatgpt_cli("hello"))
 
     assert "codex-gemini-ok:hello:execution:False:True" in result
@@ -52,6 +54,8 @@ def test_ask_chatgpt_cli_smoke(monkeypatch):
 
 def test_ask_gemini_cli_smoke(monkeypatch):
     monkeypatch.setattr(main_module, "_get_failover", lambda: _FakeFailover())
+    # Ensure weighted routing returns None to use default provider
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: None)
     result = asyncio.run(main_module.ask_gemini_cli("analyze me"))
 
     assert "gemini-codex-ok:analyze me:analysis:False:True" in result
@@ -60,6 +64,8 @@ def test_ask_gemini_cli_smoke(monkeypatch):
 
 def test_ask_claude_code_smoke(monkeypatch):
     monkeypatch.setattr(main_module, "_get_failover", lambda: _FakeFailover())
+    # Ensure weighted routing returns None to use default provider
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: None)
     monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
     result = asyncio.run(main_module.ask_claude_code("review this"))
 

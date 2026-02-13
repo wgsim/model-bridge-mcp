@@ -15,13 +15,20 @@ import inspect
 from datetime import datetime, timezone
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
 from model_bridge.config.config_loader import load_config
+from model_bridge.core.batch_executor import (
+    BatchExecutor,
+    PrioritizedJob,
+    Priority,
+    parse_priority,
+)
 from model_bridge.core.failover_manager import FailoverManager
 from model_bridge.core.provider_registry import ProviderRegistry, build_default_provider_registry
 from model_bridge.core.prompt_cache import PromptCache
+from model_bridge.core.rate_limiter import TokenBucket
 from model_bridge.core.session_memory import SessionMemory
 from model_bridge.security.sanitizer import SecuritySanitizer
 
@@ -1181,7 +1188,37 @@ async def ask_batch(
     session_id: str | None = None,
     instruction_preset: str | None = None,
     output_mode: str | None = None,
+    priority: str = "normal",
+    stream_results: bool = False,
+    rate_limit_rps: float | None = None,
+    ctx: Context | None = None,
 ) -> str:
+    """Send multiple prompts in batch (sequential or parallel).
+
+    Args:
+        prompts: List of text prompts to send.
+        provider: 'auto' (default), 'codex', 'gemini', 'ollama', 'claude_code'.
+        model: Model name or 'default'/'auto'.
+        mode: 'sequential' (default) or 'parallel'.
+        max_concurrency: Max parallel requests when mode='parallel' (default 3).
+        save_path: Optional file path to save combined results.
+        force_model: If True, skip failover chain.
+        timeout_seconds: Per-call timeout in seconds.
+        max_output_tokens: Limit response tokens.
+        response_format: 'json' for JSON output.
+        verbosity: 'verbose' for extra metadata.
+        stream: Reserved for future streaming support.
+        session_id: Optional session ID for conversation memory.
+        instruction_preset: 'strict_once' or 'none'.
+        output_mode: 'clean' (default) or 'raw'.
+        priority: 'high', 'normal' (default), or 'low' - job priority for scheduling.
+        stream_results: If True, report progress via MCP progress notifications.
+        rate_limit_rps: Optional rate limit in requests per second.
+        ctx: MCP context for progress reporting.
+
+    Returns:
+        JSON array of results with index, status, and response for each prompt.
+    """
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
@@ -1254,19 +1291,33 @@ async def ask_batch(
                 "error": str(exc),
             }
 
+    # Build progress callback for streaming results
+    async def _report_progress(completed: int, total: int) -> None:
+        if stream_results and ctx:
+            await ctx.report_progress(progress=completed, total=total)
+
+    # Build rate limiter if requested
+    rate_limiter = None
+    if rate_limit_rps is not None and rate_limit_rps > 0:
+        rate_limiter = TokenBucket(rate=rate_limit_rps, capacity=min(rate_limit_rps, 10.0))
+
+    # Build prioritized jobs
+    parsed_priority = parse_priority(priority)
+    jobs = [
+        PrioritizedJob(job_id=idx, prompt=p, priority=parsed_priority, _insertion_order=idx)
+        for idx, p in enumerate(cleaned_prompts)
+    ]
+
+    # Use BatchExecutor for execution
+    executor = BatchExecutor(
+        rate_limiter=rate_limiter,
+        max_concurrency=effective_max_concurrency,
+    )
+
     if normalized_mode == "sequential":
-        results = []
-        for idx, prompt_text in enumerate(cleaned_prompts):
-            results.append(await _run_one(idx, prompt_text))
+        results = await executor.execute_sequential(jobs, _run_one, _report_progress)
     else:
-        sem = asyncio.Semaphore(effective_max_concurrency)
-
-        async def _run_with_limit(idx: int, prompt_text: str) -> dict:
-            async with sem:
-                return await _run_one(idx, prompt_text)
-
-        tasks = [_run_with_limit(idx, prompt_text) for idx, prompt_text in enumerate(cleaned_prompts)]
-        results = await asyncio.gather(*tasks)
+        results = await executor.execute_parallel(jobs, _run_one, _report_progress)
 
     ok_count = sum(1 for item in results if item["status"] == "ok")
     err_count = len(results) - ok_count
@@ -1284,6 +1335,8 @@ async def ask_batch(
     }
     if concurrency_meta is not None:
         payload["concurrency_guard"] = concurrency_meta
+    if rate_limit_rps is not None:
+        payload["rate_limit_rps"] = rate_limit_rps
     return json.dumps(payload, ensure_ascii=False)
 
 

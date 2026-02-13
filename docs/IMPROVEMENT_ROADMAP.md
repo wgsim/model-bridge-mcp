@@ -188,7 +188,7 @@ Week 5+: P3 항목 구현
 | P1-3: 테스트 커버리지 강화 | ✅ 완료 | 2026-02-12 | `15dda52` |
 | P2-1: 매트릭 스위칭 | ✅ 완료 | 2026-02-12 | `121f976`, `ffe79c7` |
 | P2-2: Telemetry/Observability | ✅ 완료 | 2026-02-12 | `28a7ec3` |
-| P2-3: 배치 성능 최적화 | ⏳ 대기중 | | |
+| P2-3: 배치 성능 최적화 | ✅ 완료 | 2026-02-13 | Priority queue, rate limiter integration, progress streaming |
 
 **참고**:
 - P1-2: Error category enum 및 ErrorInfo dataclass 추가됨
