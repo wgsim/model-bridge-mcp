@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import re
 import time
 import json
@@ -636,6 +637,42 @@ def _resolve_fallback_chain(requested_model: str) -> list[str]:
     return ordered
 
 
+def _select_provider_by_weight(chain_name: str) -> str | None:
+    """Select a provider from weighted chain using weighted random selection.
+
+    Args:
+        chain_name: Name of the chain (e.g., 'ask_chatgpt_cli')
+
+    Returns:
+        Selected provider ID, or None if weighted chains not configured
+    """
+    config = _get_config()
+    weighted_chains = config.get("routing", {}).get("weighted_chains")
+
+    if not weighted_chains:
+        return None
+
+    chain = weighted_chains.get(chain_name)
+    if not chain:
+        return None
+
+    # Calculate total weight and select provider
+    total_weight = sum(entry.get("weight", 100) for entry in chain)
+    if total_weight == 0:
+        return None
+
+    rand = random.uniform(0, total_weight)
+    cumulative = 0.0
+
+    for entry in chain:
+        weight = entry.get("weight", 100)
+        cumulative += weight
+        if rand <= cumulative:
+            return entry.get("provider")
+
+    return chain[-1].get("provider") if chain else None
+
+
 async def _run_ollama_with_timeout(
     model_name: str,
     prompt: str,
@@ -837,16 +874,23 @@ async def ask_chatgpt_cli(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
+
+    # P2-1: Use weighted routing if configured
+    primary_provider = _select_provider_by_weight("ask_chatgpt_cli")
+    if primary_provider is None:
+        primary_provider = "codex"
+    secondary_provider = "gemini"
+
     response = ""
-    for trial_model in _build_provider_model_trials("codex", model):
+    for trial_model in _build_provider_model_trials(primary_provider, model):
         provider_args = (
-            {"codex": _build_provider_model_args("codex", trial_model)}
+            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
             if trial_model is not None
             else None
         )
         response = await _execute_failover_with_timeout(
-            "codex",
-            "gemini",
+            primary_provider,
+            secondary_provider,
             prompt,
             "execution",
             force_primary=force_model,
@@ -860,7 +904,7 @@ async def ask_chatgpt_cli(
         if not _is_model_selection_failure(response):
             break
     response = _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
-    return _finalize_response(response, "codex", options)
+    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -880,16 +924,23 @@ async def ask_gemini_cli(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
+
+    # P2-1: Use weighted routing if configured
+    primary_provider = _select_provider_by_weight("ask_gemini_cli")
+    if primary_provider is None:
+        primary_provider = "gemini"
+    secondary_provider = "codex"
+
     response = ""
-    for trial_model in _build_provider_model_trials("gemini", model):
+    for trial_model in _build_provider_model_trials(primary_provider, model):
         provider_args = (
-            {"gemini": _build_provider_model_args("gemini", trial_model)}
+            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
             if trial_model is not None
             else None
         )
         response = await _execute_failover_with_timeout(
-            "gemini",
-            "codex",
+            primary_provider,
+            secondary_provider,
             prompt,
             "analysis",
             force_primary=force_model,
@@ -903,7 +954,7 @@ async def ask_gemini_cli(
         if not _is_model_selection_failure(response):
             break
     response = _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
-    return _finalize_response(response, "gemini", options)
+    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
