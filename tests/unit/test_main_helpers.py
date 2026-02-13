@@ -120,11 +120,11 @@ def test_apply_instruction_preset_strict_once_includes_policy_and_prompt():
 def test_ask_applies_instruction_preset_before_dispatch(monkeypatch):
     captured = {}
 
-    async def _fake_codex(prompt, **kwargs):
+    async def _fake_dispatch(provider_id, prompt, **kwargs):
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(main_module, "ask_chatgpt_cli", _fake_codex)
+    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
 
     out = asyncio.run(
         main_module.ask(
@@ -143,11 +143,11 @@ def test_ask_applies_instruction_preset_before_dispatch(monkeypatch):
 def test_ask_uses_runtime_default_instruction_preset_when_omitted(monkeypatch):
     captured = {}
 
-    async def _fake_codex(prompt, **kwargs):
+    async def _fake_dispatch(provider_id, prompt, **kwargs):
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(main_module, "ask_chatgpt_cli", _fake_codex)
+    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
     monkeypatch.setattr(
         main_module,
         "_get_config",
