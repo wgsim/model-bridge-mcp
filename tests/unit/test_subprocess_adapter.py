@@ -41,7 +41,25 @@ def test_run_returns_error_when_command_missing():
     with patch("shutil.which", return_value=None):
         ok, output = adapter.run("ollama", [], "hello")
     assert ok is False
-    assert output == "System Error: Command 'ollama' not found."
+    assert "System Error: Command 'ollama' not found." in output
+    assert "Install:" in output
+
+
+def test_run_returns_install_hint_for_known_commands():
+    adapter = SubprocessAdapter({"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}})
+    with patch("shutil.which", return_value=None):
+        ok, output = adapter.run("gemini", [], "hello")
+    assert ok is False
+    assert "gemini" in output.lower()
+    assert "Install:" in output
+
+
+def test_run_returns_no_install_hint_for_unknown_commands():
+    adapter = SubprocessAdapter({"custom": {"exec": ["my_custom_cli"], "health": ["my_custom_cli", "--version"]}})
+    with patch("shutil.which", return_value=None):
+        ok, output = adapter.run("custom", [], "hello")
+    assert ok is False
+    assert output == "System Error: Command 'my_custom_cli' not found."
 
 
 def test_run_returns_combined_output_on_nonzero_exit():

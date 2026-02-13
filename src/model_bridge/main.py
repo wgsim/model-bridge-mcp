@@ -19,8 +19,9 @@ from mcp.server.fastmcp import FastMCP
 
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
 from model_bridge.config.config_loader import load_config
-from model_bridge.core.failover_manager import FailoverManager
+from model_bridge.core.failover_manager import FailoverManager, get_last_errors as _get_last_errors_from_buffer
 from model_bridge.core.provider_registry import ProviderRegistry, build_default_provider_registry
+from model_bridge.core.task_tracker import TaskTracker
 from model_bridge.core.prompt_cache import PromptCache
 from model_bridge.core.session_memory import SessionMemory
 from model_bridge.security.sanitizer import SecuritySanitizer
@@ -39,6 +40,7 @@ FAILOVER: Optional[FailoverManager] = None
 PROMPT_CACHE: Optional[PromptCache] = None
 SESSION_MEMORY: Optional[SessionMemory] = None
 PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
+TASK_TRACKER: TaskTracker = TaskTracker()
 
 
 def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
@@ -693,7 +695,11 @@ async def _run_ollama_with_timeout(
         kwargs["timeout_seconds"] = timeout_seconds
     if supports_strip_noise:
         kwargs["strip_noise"] = output_mode != "raw"
-    return await run_async("ollama", [model_name], prompt, **kwargs)
+    task_id = TASK_TRACKER.register("ollama", prompt)
+    try:
+        return await run_async("ollama", [model_name], prompt, **kwargs)
+    finally:
+        TASK_TRACKER.deregister(task_id)
 
 
 async def _execute_failover_with_timeout(
@@ -708,6 +714,15 @@ async def _execute_failover_with_timeout(
     provider_args: dict[str, list[str]] | None = None,
     output_mode: str = "clean",
 ) -> str:
+    # Preflight check on primary provider
+    try:
+        adapter = _get_adapter()
+        pf_ok, pf_msg = adapter.preflight_check(primary)
+        if not pf_ok and force_primary:
+            return f"[PREFLIGHT FAILED] {primary}: {pf_msg}"
+    except Exception:
+        pass  # preflight is best-effort; proceed to failover
+
     failover = _get_failover()
     execute_async = failover.execute_async
     params = inspect.signature(execute_async).parameters
@@ -727,15 +742,19 @@ async def _execute_failover_with_timeout(
         kwargs["provider_args"] = provider_args
     if supports_output_mode:
         kwargs["output_mode"] = output_mode
-    return await execute_async(
-        primary,
-        secondary,
-        prompt,
-        mode,
-        force_primary=force_primary,
-        allow_tertiary=allow_tertiary,
-        **kwargs,
-    )
+    task_id = TASK_TRACKER.register(primary, prompt)
+    try:
+        return await execute_async(
+            primary,
+            secondary,
+            prompt,
+            mode,
+            force_primary=force_primary,
+            allow_tertiary=allow_tertiary,
+            **kwargs,
+        )
+    finally:
+        TASK_TRACKER.deregister(task_id)
 
 
 def _normalize_model_override(provider: str, model: str | None) -> str | None:
@@ -870,6 +889,23 @@ async def ask_chatgpt_cli(
     stream: bool | None = None,
     output_mode: str = "clean",
 ) -> str:
+    """Send a prompt to ChatGPT/Codex CLI with automatic failover to Gemini and Ollama.
+
+    Args:
+        prompt: The text prompt to send.
+        save_path: Optional file path to save the response.
+        force_model: If True, skip failover and only use the primary provider.
+        model: Model name override (e.g. 'gpt-4o'). None uses config default.
+        timeout_seconds: Per-call timeout in seconds. Default from config (~120s).
+        max_output_tokens: Limit response tokens (provider-dependent).
+        response_format: 'json' for JSON output, None for plain text.
+        verbosity: 'verbose' for extra metadata, None for standard.
+        stream: Reserved for future streaming support.
+        output_mode: 'clean' (default, strips CLI noise) or 'raw' (preserves all output).
+
+    Returns:
+        Provider response text with routing metadata appended.
+    """
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
@@ -920,6 +956,23 @@ async def ask_gemini_cli(
     stream: bool | None = None,
     output_mode: str = "clean",
 ) -> str:
+    """Send a prompt to Gemini CLI with automatic failover to Codex and Ollama.
+
+    Args:
+        prompt: The text prompt to send.
+        save_path: Optional file path to save the response.
+        force_model: If True, skip failover and only use the primary provider.
+        model: Model name override (e.g. 'gemini-2.5-pro'). None uses config default.
+        timeout_seconds: Per-call timeout in seconds. Default from config (~120s).
+        max_output_tokens: Limit response tokens (provider-dependent).
+        response_format: 'json' for JSON output, None for plain text.
+        verbosity: 'verbose' for extra metadata, None for standard.
+        stream: Reserved for future streaming support.
+        output_mode: 'clean' (default, strips CLI noise) or 'raw' (preserves all output).
+
+    Returns:
+        Provider response text with routing metadata appended.
+    """
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
@@ -969,6 +1022,22 @@ async def ask_ollama(
     stream: bool | None = None,
     output_mode: str = "clean",
 ) -> str:
+    """Send a prompt to a local Ollama model with cloud failover on failure.
+
+    Args:
+        prompt: The text prompt to send.
+        save_path: Optional file path to save the response.
+        model: Ollama model name or alias. 'default' uses config default, 'auto' selects by prompt.
+        timeout_seconds: Per-call timeout. Default from config ollama_timeout_seconds (~300s).
+        max_output_tokens: Limit response tokens (provider-dependent).
+        response_format: 'json' for JSON output, None for plain text.
+        verbosity: 'verbose' for extra metadata, None for standard.
+        stream: Reserved for future streaming support.
+        output_mode: 'clean' (default) or 'raw'.
+
+    Returns:
+        Provider response text. Falls back to cloud providers if Ollama is unreachable.
+    """
     effective_timeout = timeout_seconds
     if effective_timeout is None:
         runtime_cfg = _get_config().get("runtime", {})
@@ -1054,6 +1123,23 @@ async def ask_claude_code(
     stream: bool | None = None,
     output_mode: str = "clean",
 ) -> str:
+    """Send a prompt to Claude Code CLI with automatic failover to Codex and Ollama.
+
+    Args:
+        prompt: The text prompt to send.
+        save_path: Optional file path to save the response.
+        force_model: If True, skip failover and only use Claude Code.
+        model: Model name override. None uses config default.
+        timeout_seconds: Per-call timeout in seconds. Default from config (~120s).
+        max_output_tokens: Limit response tokens (provider-dependent).
+        response_format: 'json' for JSON output, None for plain text.
+        verbosity: 'verbose' for extra metadata, None for standard.
+        stream: Reserved for future streaming support.
+        output_mode: 'clean' (default) or 'raw'.
+
+    Returns:
+        Provider response text with routing metadata appended.
+    """
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
@@ -1107,6 +1193,26 @@ async def ask(
     instruction_preset: str | None = None,
     output_mode: str | None = None,
 ) -> str:
+    """Universal ask tool - routes prompt to any provider with smart failover.
+
+    Args:
+        prompt: The text prompt to send.
+        provider: 'auto' (default, routes to codex), 'codex', 'gemini', 'ollama', 'claude_code'.
+        model: Model name or 'default'/'auto'. Provider-specific (e.g. 'gpt-4o', 'gemini-2.5-pro').
+        save_path: Optional file path to save the response.
+        force_model: If True, skip failover chain.
+        timeout_seconds: Per-call timeout in seconds. Default from config.
+        max_output_tokens: Limit response tokens.
+        response_format: 'json' for JSON output, None for plain text.
+        verbosity: 'verbose' for extra metadata, None for standard.
+        stream: Reserved for future streaming support.
+        session_id: Optional session ID for multi-turn conversation memory.
+        instruction_preset: 'strict_once' or 'none'. Default from config.
+        output_mode: 'clean' (default) or 'raw'.
+
+    Returns:
+        Provider response text with routing metadata.
+    """
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
@@ -1182,6 +1288,28 @@ async def ask_batch(
     instruction_preset: str | None = None,
     output_mode: str | None = None,
 ) -> str:
+    """Send multiple prompts in batch (sequential or parallel).
+
+    Args:
+        prompts: List of text prompts to send.
+        provider: 'auto' (default), 'codex', 'gemini', 'ollama', 'claude_code'.
+        model: Model name or 'default'/'auto'.
+        mode: 'sequential' (default) or 'parallel'.
+        max_concurrency: Max parallel requests when mode='parallel' (default 3).
+        save_path: Optional file path to save combined results.
+        force_model: If True, skip failover chain.
+        timeout_seconds: Per-call timeout in seconds.
+        max_output_tokens: Limit response tokens.
+        response_format: 'json' for JSON output.
+        verbosity: 'verbose' for extra metadata.
+        stream: Reserved for future streaming support.
+        session_id: Optional session ID for conversation memory.
+        instruction_preset: 'strict_once' or 'none'.
+        output_mode: 'clean' (default) or 'raw'.
+
+    Returns:
+        JSON array of results with index, status, and response for each prompt.
+    """
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
@@ -1289,6 +1417,11 @@ async def ask_batch(
 
 @mcp.tool()
 def list_ollama_models() -> str:
+    """List available Ollama models, aliases, installed status, and pull commands for missing models.
+
+    Returns:
+        JSON with default_model, aliases, catalog, installed models, and missing models with pull commands.
+    """
     models_cfg = _get_config()["models"]
     default_model = models_cfg["ollama_default_model"]
     aliases = models_cfg["ollama_aliases"]
@@ -1320,6 +1453,14 @@ def list_ollama_models() -> str:
 
 @mcp.tool()
 def list_provider_models(provider: str = "all") -> str:
+    """List available models for one or all providers.
+
+    Args:
+        provider: 'all' (default), 'codex', 'gemini', 'ollama', or 'claude_code'.
+
+    Returns:
+        JSON with model catalogs and availability per provider.
+    """
     normalized = (provider or "all").strip().lower()
     allowed = {"all", "codex", "gemini", "ollama", "claude_code"}
     if normalized not in allowed:
@@ -1355,6 +1496,11 @@ def list_provider_models(provider: str = "all") -> str:
 
 @mcp.tool()
 def list_orchestrator_capabilities() -> str:
+    """List orchestrator parallel execution capabilities and recommended policies.
+
+    Returns:
+        JSON describing per-orchestrator parallel support and recommended usage patterns.
+    """
     payload = {
         "status": "ok",
         "recommended_policy": {
@@ -1383,6 +1529,11 @@ def list_orchestrator_capabilities() -> str:
 
 @mcp.tool()
 def list_cli_noninteractive_policy() -> str:
+    """List CLI non-interactive mode configuration and trust/auth skip flags per provider.
+
+    Returns:
+        JSON with configured exec commands, noninteractive modes, and trust-skip flags.
+    """
     commands_cfg = _get_config().get("commands", {})
     codex_exec = commands_cfg.get("codex", {}).get("exec", [])
     gemini_exec = commands_cfg.get("gemini", {}).get("exec", [])
@@ -1415,6 +1566,11 @@ def list_cli_noninteractive_policy() -> str:
 
 @mcp.tool()
 def list_prompt_execution_policy() -> str:
+    """List prompt execution policy presets and current runtime defaults.
+
+    Returns:
+        JSON with available instruction_presets, output_modes, and current defaults.
+    """
     defaults = _get_runtime_defaults()
     payload = {
         "status": "ok",
@@ -1442,6 +1598,15 @@ def list_prompt_execution_policy() -> str:
 
 @mcp.tool()
 def list_runtime_resources(model: str = "default", requested_max_concurrency: int = 1) -> str:
+    """Check Ollama resource availability and recommended batch concurrency.
+
+    Args:
+        model: Ollama model name to check resources for (default: 'default').
+        requested_max_concurrency: Desired parallel request count (default: 1).
+
+    Returns:
+        JSON with resource status and recommended concurrency settings.
+    """
     ollama_meta = _compute_ollama_batch_concurrency(model, requested_max_concurrency)
     payload = {
         "status": "ok",
@@ -1452,44 +1617,91 @@ def list_runtime_resources(model: str = "default", requested_max_concurrency: in
     return json.dumps(payload, ensure_ascii=False)
 
 
+_PROVIDER_INSTALL_HINTS = {
+    "codex": "brew install --cask codex (or npm install -g @openai/codex)",
+    "gemini": "brew install gemini-cli (or npm install -g @anthropic/gemini-cli)",
+    "ollama": "brew install --cask ollama (or https://ollama.ai/download)",
+    "claude_code": "brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
+}
+
+
 @mcp.tool()
 def health_check() -> str:
     """Check health status of model-bridge and available providers.
 
     Returns:
-        JSON with health status, available providers, and system info.
+        JSON with health status, available providers (with version and install hints),
+        ollama_running status, and current config defaults.
     """
-    import time
-
     config = _get_config()
     commands = config.get("commands", {})
+    runtime = config.get("runtime", {})
 
-    # Check provider availability
     providers_status = {}
     for provider in ["codex", "gemini", "ollama", "claude_code"]:
         cmd_config = commands.get(provider, {})
         health_cmd = cmd_config.get("health", [])
-        if health_cmd:
-            try:
-                result = subprocess.run(
-                    health_cmd,
-                    capture_output=True,
-                    timeout=5,
-                )
-                providers_status[provider] = {
-                    "available": result.returncode == 0,
-                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                }
-            except Exception as e:
-                providers_status[provider] = {
-                    "available": False,
-                    "error": str(e),
-                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                }
-        else:
-            providers_status[provider] = {"available": False, "error": "not configured"}
+        exec_cmd = cmd_config.get("exec", [])
 
-    # Overall status
+        if not health_cmd:
+            entry: dict = {
+                "available": False,
+                "error": "not configured",
+            }
+            hint = _PROVIDER_INSTALL_HINTS.get(provider)
+            if hint:
+                entry["install_hint"] = hint
+            providers_status[provider] = entry
+            continue
+
+        # Check if CLI binary is installed
+        bin_name = exec_cmd[0] if exec_cmd else health_cmd[0]
+        if not shutil.which(bin_name):
+            entry = {
+                "available": False,
+                "error": f"CLI '{bin_name}' not found in PATH",
+            }
+            hint = _PROVIDER_INSTALL_HINTS.get(provider)
+            if hint:
+                entry["install_hint"] = hint
+            providers_status[provider] = entry
+            continue
+
+        try:
+            result = subprocess.run(
+                health_cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            entry = {
+                "available": result.returncode == 0,
+                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            if result.returncode == 0 and result.stdout.strip():
+                entry["version"] = result.stdout.strip().splitlines()[0][:120]
+            elif result.returncode != 0:
+                entry["error"] = f"health command exited with code {result.returncode}"
+            providers_status[provider] = entry
+        except subprocess.TimeoutExpired:
+            providers_status[provider] = {
+                "available": False,
+                "error": "health check timed out (5s)",
+                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        except Exception as e:
+            providers_status[provider] = {
+                "available": False,
+                "error": str(e),
+                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+
+    # Ollama-specific: distinguish "not installed" vs "not running"
+    ollama_entry = providers_status.get("ollama", {})
+    ollama_running = ollama_entry.get("available", False)
+    if not ollama_running and shutil.which("ollama"):
+        ollama_entry["note"] = "Ollama CLI is installed but service may not be running. Try: ollama serve"
+
     any_available = any(p.get("available", False) for p in providers_status.values())
 
     payload = {
@@ -1497,9 +1709,88 @@ def health_check() -> str:
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "version": "0.1.4",
         "providers": providers_status,
+        "ollama_running": ollama_running,
+        "config_defaults": {
+            "subprocess_timeout_seconds": runtime.get("subprocess_timeout_seconds"),
+            "ollama_timeout_seconds": runtime.get("ollama_timeout_seconds"),
+            "system_suffix_enabled": bool(runtime.get("system_suffix")),
+        },
     }
 
     return json.dumps(payload, ensure_ascii=False)
+
+
+@mcp.tool()
+def set_config(
+    timeout_seconds: float | None = None,
+    ollama_timeout_seconds: float | None = None,
+) -> str:
+    """Update runtime configuration (timeout defaults) without restarting the server.
+
+    Args:
+        timeout_seconds: New default subprocess timeout in seconds (e.g. 180.0).
+        ollama_timeout_seconds: New default Ollama-specific timeout in seconds.
+
+    Returns:
+        JSON with the new effective configuration values.
+    """
+    global CONFIG, ADAPTER
+    config = _get_config()
+    runtime = config.get("runtime", {})
+    changes = {}
+
+    if timeout_seconds is not None:
+        runtime["subprocess_timeout_seconds"] = timeout_seconds
+        changes["subprocess_timeout_seconds"] = timeout_seconds
+        adapter = _get_adapter()
+        adapter.timeout_seconds = timeout_seconds
+
+    if ollama_timeout_seconds is not None:
+        runtime["ollama_timeout_seconds"] = ollama_timeout_seconds
+        changes["ollama_timeout_seconds"] = ollama_timeout_seconds
+
+    return json.dumps(
+        {
+            "status": "ok",
+            "changes": changes,
+            "effective": {
+                "subprocess_timeout_seconds": runtime.get("subprocess_timeout_seconds"),
+                "ollama_timeout_seconds": runtime.get("ollama_timeout_seconds"),
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool()
+def list_last_errors(count: int = 5) -> str:
+    """Return recent error details from the in-memory error buffer.
+
+    Args:
+        count: Number of recent errors to return (default 5, max 50).
+
+    Returns:
+        JSON array of recent errors with timestamp, provider, category, and message.
+    """
+    errors = _get_last_errors_from_buffer(count)
+    return json.dumps(
+        {"status": "ok", "count": len(errors), "errors": errors},
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool()
+def list_active_tasks() -> str:
+    """List currently running subprocess calls with provider, elapsed time, and prompt preview.
+
+    Returns:
+        JSON with active task count and task details.
+    """
+    tasks = TASK_TRACKER.list_active()
+    return json.dumps(
+        {"status": "ok", "active_count": len(tasks), "tasks": tasks},
+        ensure_ascii=False,
+    )
 
 
 def run() -> None:

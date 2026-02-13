@@ -7,9 +7,17 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from typing import Mapping, Sequence, Tuple
 
 from .base import CLIAdapter
+
+_INSTALL_HINTS: dict[str, str] = {
+    "codex": "Install: brew install --cask codex (or npm install -g @openai/codex)",
+    "gemini": "Install: brew install gemini-cli (or npm install -g @anthropic/gemini-cli)",
+    "ollama": "Install: brew install --cask ollama (or https://ollama.ai/download)",
+    "claude": "Install: brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
+}
 
 
 class SubprocessAdapter(CLIAdapter):
@@ -28,6 +36,58 @@ class SubprocessAdapter(CLIAdapter):
         self.system_suffix = system_suffix
         self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
         self.timeout_seconds = timeout_seconds
+        self._preflight_cache: dict[str, tuple[bool, str, float]] = {}
+
+    _PREFLIGHT_CACHE_TTL = 60.0
+
+    def preflight_check(self, service_name: str) -> tuple[bool, str]:
+        """Check if a CLI provider is installed and responsive (cached for 60s)."""
+        now = time.time()
+        cached = self._preflight_cache.get(service_name)
+        if cached is not None:
+            ok, msg, ts = cached
+            if now - ts < self._PREFLIGHT_CACHE_TTL:
+                return ok, msg
+
+        config = self.cli_config.get(service_name, {})
+        cmd_base = list(config.get("exec", []))
+        if not cmd_base:
+            result = (False, f"No command configured for {service_name}")
+            self._preflight_cache[service_name] = (*result, now)
+            return result
+
+        if not shutil.which(cmd_base[0]):
+            hint = _INSTALL_HINTS.get(cmd_base[0], "")
+            hint_suffix = f" {hint}" if hint else ""
+            result = (False, f"Command '{cmd_base[0]}' not found.{hint_suffix}")
+            self._preflight_cache[service_name] = (*result, now)
+            return result
+
+        health_cmd = list(config.get("health", []))
+        if health_cmd:
+            try:
+                proc = subprocess.run(
+                    health_cmd, capture_output=True, timeout=5, check=False
+                )
+                if proc.returncode != 0:
+                    result = (
+                        False,
+                        f"Health check failed for {service_name} (exit={proc.returncode})",
+                    )
+                    self._preflight_cache[service_name] = (*result, now)
+                    return result
+            except subprocess.TimeoutExpired:
+                result = (False, f"Health check timed out for {service_name}")
+                self._preflight_cache[service_name] = (*result, now)
+                return result
+            except Exception as exc:
+                result = (False, f"Health check error for {service_name}: {exc}")
+                self._preflight_cache[service_name] = (*result, now)
+                return result
+
+        result = (True, "ok")
+        self._preflight_cache[service_name] = (*result, now)
+        return result
 
     _NOISE_LINE_PATTERNS = (
         re.compile(r"^Loaded cached credentials\.?$"),
@@ -57,7 +117,9 @@ class SubprocessAdapter(CLIAdapter):
         if not cmd_base:
             return False, f"Configuration Error: No command defined for {service_name}", [], ""
         if not shutil.which(cmd_base[0]):
-            return False, f"System Error: Command '{cmd_base[0]}' not found.", [], ""
+            hint = _INSTALL_HINTS.get(cmd_base[0], "")
+            hint_suffix = f" {hint}" if hint else ""
+            return False, f"System Error: Command '{cmd_base[0]}' not found.{hint_suffix}", [], ""
         if self.apply_system_suffix_for.get(service_name, True):
             full_input = input_text + self.system_suffix
         else:
