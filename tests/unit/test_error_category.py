@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, strategies as st
 
 from model_bridge.core.error_category import (
     ErrorCategory,
@@ -100,3 +101,65 @@ class TestErrorInfo:
         """Test that categorization is case-insensitive."""
         error = ErrorInfo.from_message("RATE LIMIT Exceeded", "test_provider")
         assert error.category == ErrorCategory.RATE_LIMITED
+
+
+class TestErrorInfoPropertyBased:
+    """Property-based tests for ErrorInfo using Hypothesis."""
+
+    @given(
+        message=st.text(min_size=1),
+        provider=st.text(min_size=1, alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"),
+    )
+    def test_from_message_always_returns_valid_error_info(self, message, provider):
+        """Test that from_message always returns a valid ErrorInfo."""
+        error = ErrorInfo.from_message(message, provider)
+
+        assert error.category in ErrorCategory
+        assert error.raw_message == message
+        assert error.provider == provider
+        assert isinstance(error.is_retryable, bool)
+        assert isinstance(error.suggested_action, str)
+        assert len(error.suggested_action) > 0
+
+    @given(
+        message=st.sampled_from([
+            "rate limit exceeded",
+            "too many requests",
+            "429",
+            "quota exceeded",
+            "throttled",
+            "request timeout",
+            "timed out",
+            "deadline exceeded",
+            "service unavailable",
+            "503",
+            "connection refused",
+            "connection reset",
+        ])
+    )
+    def test_retryable_errors_are_always_marked_retryable(self, message):
+        """Test that known retryable errors are marked as retryable."""
+        error = ErrorInfo.from_message(message, "test_provider")
+        assert error.is_retryable is True
+
+    @given(
+        message=st.sampled_from([
+            "invalid api key",
+            "unauthorized",
+            "401",
+            "invalid request",
+            "malformed",
+            "[SECURITY BLOCK]",
+            "model xyz not found",
+        ])
+    )
+    def test_non_retryable_errors_are_always_marked_non_retryable(self, message):
+        """Test that known non-retryable errors are marked as non-retryable."""
+        error = ErrorInfo.from_message(message, "test_provider")
+        assert error.is_retryable is False
+
+    @given(st.text())
+    def test_suggested_action_is_never_empty(self, message):
+        """Test that suggested_action is always provided."""
+        error = ErrorInfo.from_message(message, "test_provider")
+        assert len(error.suggested_action) > 0
