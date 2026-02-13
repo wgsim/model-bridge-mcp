@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "error_info.schema.json",
+  "title": "ErrorInfo",
+  "description": "Structured error information for failover decisions",
+  "type": "object",
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "rate_limited",
+        "timeout",
+        "provider_unavailable",
+        "auth_failed",
+        "invalid_request",
+        "security_blocked",
+        "execution_error",
+        "model_not_found",
+        "configuration_error"
+      ],
+      "description": "Error category identifier"
+    },
+    "raw_message": {
+      "type": "string",
+      "description": "Original error message"
+    },
+    "provider": {
+      "type": "string",
+      "description": "Provider that generated the error"
+    },
+    "is_retryable": {
+      "type": "boolean",
+      "description": "Whether the error is retryable"
+    },
+    "suggested_action": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Suggested action for resolving the error"
+    }
+  },
+  "required": [
+    "category",
+    "raw_message",
+    "provider",
+    "is_retryable",
+    "suggested_action"
+  ],
+  "additionalProperties": false
+}
