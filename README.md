@@ -37,6 +37,33 @@ Config loader verification:
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridge.config.config_loader --pretty'
 ```
 
+## Plugins
+
+model-bridge-mcp supports a plugin architecture for extending with custom AI providers.
+
+### Plugin Locations
+- **Built-in**: `src/model_bridge/plugins/builtins/`
+- **User**: `~/.model_bridge/plugins/`
+
+### Creating a Custom Plugin
+
+```python
+# ~/.model_bridge/plugins/my_provider/plugin.py
+from model_bridge.plugins import ProviderPlugin, register_provider
+
+@register_provider
+class MyProvider(ProviderPlugin):
+    @property
+    def provider_id(self) -> str:
+        return "my_custom"
+
+    async def execute(self, prompt: str, model, options, **kwargs) -> str:
+        # Your implementation
+        return "response"
+```
+
+See [docs/PLUGIN_GUIDE.md](docs/PLUGIN_GUIDE.md) for full documentation.
+
 ## Run
 ### Import smoke
 ```bash
