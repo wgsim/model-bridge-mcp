@@ -3,7 +3,25 @@ import json
 import os
 import time
 
+import pytest
+
 from model_bridge import main as main_module
+
+
+@pytest.fixture
+def reset_provider_registry(monkeypatch):
+    """Reset PROVIDER_REGISTRY before each test that needs it."""
+    monkeypatch.setattr(main_module, "PROVIDER_REGISTRY", None)
+
+
+def _make_fake_handlers(fake_codex):
+    """Create fake provider handlers dict with fake codex handler."""
+    return {
+        "codex": fake_codex,
+        "gemini": lambda *a, **k: "gemini-result",
+        "ollama": lambda *a, **k: "ollama-result",
+        "claude_code": lambda *a, **k: "claude-code-result",
+    }
 
 
 def test_clean_markdown_fences_extracts_inner_content():
@@ -117,14 +135,18 @@ def test_apply_instruction_preset_strict_once_includes_policy_and_prompt():
     assert "[User Prompt]\ndo work" in out
 
 
-def test_ask_applies_instruction_preset_before_dispatch(monkeypatch):
+def test_ask_applies_instruction_preset_before_dispatch(monkeypatch, reset_provider_registry):
     captured = {}
 
-    async def _fake_dispatch(provider_id, prompt, **kwargs):
+    async def _fake_codex(prompt, **kwargs):
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: _make_fake_handlers(_fake_codex),
+    )
 
     out = asyncio.run(
         main_module.ask(
@@ -140,14 +162,18 @@ def test_ask_applies_instruction_preset_before_dispatch(monkeypatch):
     assert "Output valid JSON only." in captured["prompt"]
 
 
-def test_ask_uses_runtime_default_instruction_preset_when_omitted(monkeypatch):
+def test_ask_uses_runtime_default_instruction_preset_when_omitted(monkeypatch, reset_provider_registry):
     captured = {}
 
-    async def _fake_dispatch(provider_id, prompt, **kwargs):
+    async def _fake_codex(prompt, **kwargs):
         captured["prompt"] = prompt
         return "ok"
 
-    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: _make_fake_handlers(_fake_codex),
+    )
     monkeypatch.setattr(
         main_module,
         "_get_config",

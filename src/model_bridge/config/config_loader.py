@@ -16,6 +16,13 @@ class ConfigError(RuntimeError):
     """Raised when config is missing or invalid."""
 
 
+class ProviderRoutingEntry(BaseModel):
+    """Single provider entry in a routing chain with weight."""
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(min_length=1, description="Provider identifier (codex, gemini, ollama, claude_code)")
+    weight: int = Field(default=100, ge=1, le=100, description="Provider weight (1-100, higher is preferred)")
+
+
 class ServiceCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exec: list[str] = Field(min_length=1)
@@ -31,15 +38,25 @@ class CommandsConfig(BaseModel):
 
 
 class RoutingChains(BaseModel):
+    """Legacy routing chains using provider lists (for backward compatibility)."""
     model_config = ConfigDict(extra="forbid")
     ask_chatgpt_cli: list[str] = Field(min_length=1)
     ask_gemini_cli: list[str] = Field(min_length=1)
     ask_ollama_cloud_fallback: list[str] = Field(min_length=1)
 
 
+class WeightedRoutingChains(BaseModel):
+    """Weighted routing chains with provider entries and weights."""
+    model_config = ConfigDict(extra="forbid")
+    ask_chatgpt_cli: list[ProviderRoutingEntry] | None = Field(default=None, min_length=1)
+    ask_gemini_cli: list[ProviderRoutingEntry] | None = Field(default=None, min_length=1)
+    ask_ollama_cloud_fallback: list[ProviderRoutingEntry] | None = Field(default=None, min_length=1)
+
+
 class RoutingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     default_chains: RoutingChains
+    weighted_chains: WeightedRoutingChains | None = Field(default=None, description="Weighted provider chains with traffic distribution")
 
 
 class ModelsConfig(BaseModel):

@@ -1,75 +1,148 @@
 import asyncio
 import json
+
 import pytest
 
 from model_bridge import main as main_module
 
 
-class FakeDispatcher:
-    """Fake dispatcher that returns canned responses for testing."""
-
-    def __init__(self):
-        self.calls = []
-        self.responses = {}
-        self.default_response = "default-result"
-
-    def set_response(self, provider: str, response: str):
-        self.responses[provider] = response
-
-    async def dispatch(self, provider_id: str, prompt: str, **kwargs):
-        self.calls.append({"provider": provider_id, "prompt": prompt, "kwargs": kwargs})
-        return self.responses.get(provider_id, self.default_response)
+async def _fake_codex(*args, **kwargs):
+    return "codex-result"
 
 
-@pytest.fixture
-def fake_dispatcher(monkeypatch):
-    """Fixture that mocks _dispatch_ask_provider with a FakeDispatcher."""
-    dispatcher = FakeDispatcher()
+async def _fake_gemini(*args, **kwargs):
+    if kwargs.get("response_format") == "json":
+        return json.dumps(
+            {
+                "provider": "gemini",
+                "cached": False,
+                "content": "gemini-result",
+                "meta": {"verbosity": "normal", "max_output_tokens": 0, "stream": False},
+            }
+        )
+    return "gemini-result"
 
-    async def _fake_dispatch(provider_id: str, prompt: str, **kwargs):
-        return await dispatcher.dispatch(provider_id, prompt, **kwargs)
 
-    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
-    return dispatcher
+async def _fake_ollama(*args, **kwargs):
+    return "ollama-result"
 
 
-def test_ask_unified_routes_to_codex(fake_dispatcher):
-    fake_dispatcher.set_response("codex", "codex-result")
+async def _fake_claude_code(*args, **kwargs):
+    return "claude-code-result"
+
+
+@pytest.fixture(autouse=True)
+def reset_provider_registry(monkeypatch):
+    """Reset PROVIDER_REGISTRY before each test to ensure fresh handlers."""
+    monkeypatch.setattr(main_module, "PROVIDER_REGISTRY", None)
+
+
+def test_ask_unified_routes_to_codex(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex,
+            "gemini": _fake_gemini,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+        },
+    )
     out = asyncio.run(main_module.ask("hello", provider="codex"))
     assert out == "codex-result"
 
 
-def test_ask_unified_routes_to_ollama(fake_dispatcher):
-    fake_dispatcher.set_response("ollama", "ollama-result")
+def test_ask_unified_routes_to_ollama(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex,
+            "gemini": _fake_gemini,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+        },
+    )
     out = asyncio.run(main_module.ask("hello", provider="ollama", model="default"))
     assert out == "ollama-result"
 
 
-def test_ask_unified_routes_to_claude_code(fake_dispatcher):
-    fake_dispatcher.set_response("claude_code", "claude-code-result")
+def test_ask_unified_routes_to_claude_code(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex,
+            "gemini": _fake_gemini,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+        },
+    )
     out = asyncio.run(main_module.ask("hello", provider="claude_code"))
     assert out == "claude-code-result"
 
 
-def test_ask_unified_forwards_model_to_codex_provider(fake_dispatcher):
-    fake_dispatcher.set_response("codex", "codex-result")
+def test_ask_unified_forwards_model_to_codex_provider(monkeypatch):
+    captured = {}
+
+    async def _fake_codex_capture(*args, **kwargs):
+        captured["model"] = kwargs.get("model")
+        return "codex-result"
+
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex_capture,
+            "gemini": _fake_gemini,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+        },
+    )
     out = asyncio.run(main_module.ask("hello", provider="codex", model="gpt-5"))
     assert out == "codex-result"
-    # Check that model was captured in the dispatch call
-    assert len(fake_dispatcher.calls) == 1
-    assert fake_dispatcher.calls[0]["kwargs"].get("model") == "gpt-5"
+    assert captured["model"] == "gpt-5"
 
 
-def test_ask_unified_forwards_output_mode_to_provider(fake_dispatcher):
-    fake_dispatcher.set_response("codex", "codex-result")
+def test_ask_unified_forwards_output_mode_to_provider(monkeypatch):
+    captured = {}
+
+    async def _fake_codex_capture(*args, **kwargs):
+        captured["output_mode"] = kwargs.get("output_mode")
+        return "codex-result"
+
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex_capture,
+            "gemini": _fake_gemini,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+        },
+    )
     out = asyncio.run(main_module.ask("hello", provider="codex", output_mode="raw"))
     assert out == "codex-result"
-    assert len(fake_dispatcher.calls) == 1
-    assert fake_dispatcher.calls[0]["kwargs"].get("output_mode") == "raw"
+    assert captured["output_mode"] == "raw"
 
 
-def test_ask_unified_uses_runtime_default_output_mode_when_omitted(fake_dispatcher, monkeypatch):
-    fake_dispatcher.set_response("codex", "codex-result")
+def test_ask_unified_uses_runtime_default_output_mode_when_omitted(monkeypatch):
+    captured = {}
+
+    async def _fake_codex_capture(*args, **kwargs):
+        captured["output_mode"] = kwargs.get("output_mode")
+        return "codex-result"
+
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex_capture,
+            "gemini": _fake_gemini,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+        },
+    )
     monkeypatch.setattr(
         main_module,
         "_get_config",
@@ -90,52 +163,50 @@ def test_ask_unified_uses_runtime_default_output_mode_when_omitted(fake_dispatch
 
     out = asyncio.run(main_module.ask("hello", provider="codex"))
     assert out == "codex-result"
-    assert len(fake_dispatcher.calls) == 1
-    assert fake_dispatcher.calls[0]["kwargs"].get("output_mode") == "raw"
+    assert captured["output_mode"] == "raw"
 
 
-def test_ask_unified_json_response(fake_dispatcher):
-    fake_dispatcher.set_response(
-        "gemini",
-        json.dumps(
-            {
-                "provider": "gemini",
-                "cached": False,
-                "content": "gemini-result",
-                "meta": {"verbosity": "normal", "max_output_tokens": 0, "stream": False},
-            }
-        ),
+def test_ask_unified_json_response(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex,
+            "gemini": _fake_gemini,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+        },
     )
     out = asyncio.run(main_module.ask("hello", provider="gemini", response_format="json"))
     payload = json.loads(out)
     assert payload["content"] == "gemini-result"
 
 
-def test_ask_unified_json_cache_hit_marks_cached_without_double_wrap(fake_dispatcher, monkeypatch):
+def test_ask_unified_json_cache_hit_marks_cached_without_double_wrap(monkeypatch):
     calls = {"count": 0}
 
-    class CountingDispatcher:
-        def __init__(self):
-            self.dispatcher = FakeDispatcher()
+    async def _fake_gemini_counted(*args, **kwargs):
+        calls["count"] += 1
+        return json.dumps(
+            {
+                "provider": "gemini",
+                "cached": False,
+                "content": "gemini-result",
+                "meta": {"verbosity": "normal", "max_output_tokens": 0, "stream": False},
+            }
+        )
 
-        async def dispatch(self, provider_id: str, prompt: str, **kwargs):
-            calls["count"] += 1
-            return json.dumps(
-                {
-                    "provider": "gemini",
-                    "cached": False,
-                    "content": "gemini-result",
-                    "meta": {"verbosity": "normal", "max_output_tokens": 0, "stream": False},
-                }
-            )
-
-    counting = CountingDispatcher()
     cache = main_module.PromptCache(ttl_seconds=60, max_entries=8)
-
-    async def _fake_dispatch(provider_id: str, prompt: str, **kwargs):
-        return await counting.dispatch(provider_id, prompt, **kwargs)
-
-    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex,
+            "gemini": _fake_gemini_counted,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+        },
+    )
     monkeypatch.setattr(main_module, "_get_prompt_cache", lambda: cache)
 
     first = asyncio.run(main_module.ask("hello", provider="gemini", response_format="json"))
@@ -158,10 +229,10 @@ def test_ask_unified_json_cache_hit_with_malformed_json_falls_back_safely(monkey
         def set(self, key, value):
             return None
 
-    async def _should_not_be_called(provider_id: str, prompt: str, **kwargs):
+    async def _should_not_be_called(*args, **kwargs):
         raise AssertionError("cache hit should bypass provider call")
 
-    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _should_not_be_called)
+    monkeypatch.setattr(main_module, "ask_gemini_cli", _should_not_be_called)
     monkeypatch.setattr(main_module, "_get_prompt_cache", lambda: _BadCache())
 
     out = asyncio.run(main_module.ask("hello", provider="gemini", response_format="json"))

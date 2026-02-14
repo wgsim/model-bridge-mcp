@@ -17,6 +17,26 @@ routing:
     ask_chatgpt_cli: ["codex", "gemini", "ollama"]
     ask_gemini_cli: ["gemini", "codex", "ollama"]
     ask_ollama_cloud_fallback: ["codex", "gemini"]
+  # Weighted routing chains (P2-1: Matrix Switching)
+  # Higher weight = more traffic (1-100 scale)
+  weighted_chains:
+    ask_chatgpt_cli:
+      - provider: "codex"
+        weight: 100
+      - provider: "gemini"
+        weight: 50
+      - provider: "ollama"
+        weight: 10
+    ask_gemini_cli:
+      - provider: "gemini"
+        weight: 100
+      - provider: "codex"
+        weight: 50
+    ask_ollama_cloud_fallback:
+      - provider: "codex"
+        weight: 100
+      - provider: "gemini"
+        weight: 50
 
 models:
   ollama_default_model: "gpt-oss:20b"

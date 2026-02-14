@@ -7,7 +7,12 @@ from model_bridge import main as main_module
 
 class _FakeFailover:
     async def execute_async(self, *args, **kwargs):
-        return "hello world from failover"
+        return json.dumps({
+            "provider": "codex",
+            "cached": False,
+            "content": "hello world from failover",
+            "meta": {"verbosity": "brief", "max_output_tokens": 4, "stream": False},
+        })
 
 
 class _CaptureTimeoutFailover:
@@ -88,6 +93,8 @@ class _NonModelFailureTrialFailover:
 
 def test_ask_chatgpt_cli_supports_json_format(monkeypatch):
     monkeypatch.setattr(main_module, "_get_failover", lambda: _FakeFailover())
+    # Ensure weighted routing returns None to use default provider
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: None)
     out = asyncio.run(
         main_module.ask_chatgpt_cli(
             "hi",
@@ -156,6 +163,8 @@ def test_ask_claude_code_supports_json_and_force_model(monkeypatch):
 def test_ask_chatgpt_cli_passes_model_override_to_primary_provider(monkeypatch):
     fake_failover = _CaptureProviderArgsFailover()
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    # Ensure weighted routing returns None to use default provider
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: None)
 
     out = asyncio.run(main_module.ask_chatgpt_cli("hi", model="gpt-5"))
 
@@ -167,6 +176,8 @@ def test_ask_chatgpt_cli_passes_model_override_to_primary_provider(monkeypatch):
 def test_ask_gemini_cli_passes_model_override_to_primary_provider(monkeypatch):
     fake_failover = _CaptureProviderArgsFailover()
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    # Ensure weighted routing returns None to use default provider
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: None)
 
     out = asyncio.run(main_module.ask_gemini_cli("hi", model="gemini-2.5-pro"))
 
