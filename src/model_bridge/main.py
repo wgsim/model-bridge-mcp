@@ -19,6 +19,7 @@ from mcp.server.fastmcp import FastMCP
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
 from model_bridge.config.config_loader import load_config
 from model_bridge.core.failover_manager import FailoverManager
+from model_bridge.core.plugin_loader import PluginLoader
 from model_bridge.core.provider_registry import ProviderRegistry, build_default_provider_registry
 from model_bridge.core.prompt_cache import PromptCache
 from model_bridge.core.session_memory import SessionMemory
@@ -38,6 +39,7 @@ FAILOVER: Optional[FailoverManager] = None
 PROMPT_CACHE: Optional[PromptCache] = None
 SESSION_MEMORY: Optional[SessionMemory] = None
 PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
+PLUGIN_LOADER: Optional[PluginLoader] = None
 
 
 def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
@@ -117,7 +119,13 @@ def _get_session_memory() -> Optional[SessionMemory]:
 def _get_provider_registry() -> ProviderRegistry:
     global PROVIDER_REGISTRY
     if PROVIDER_REGISTRY is None:
-        PROVIDER_REGISTRY = build_default_provider_registry(_get_config())
+        # Try to build from plugins first
+        loader = _get_plugin_loader()
+        if loader.list_plugins():
+            PROVIDER_REGISTRY = loader.build_registry(_get_config())
+        else:
+            # Fallback to default registry
+            PROVIDER_REGISTRY = build_default_provider_registry(_get_config())
     return PROVIDER_REGISTRY
 
 
@@ -132,12 +140,50 @@ def _known_providers_text() -> str:
 
 
 def _get_provider_dispatchers():
-    return {
+    """Get provider dispatcher functions.
+
+    Combines built-in providers with external plugins.
+    Built-in providers are always available; plugins add new providers.
+    """
+    # Start with built-in dispatchers
+    dispatchers = {
         "codex": ask_chatgpt_cli,
         "gemini": ask_gemini_cli,
         "ollama": ask_ollama,
         "claude_code": ask_claude_code,
     }
+
+    # Add external plugins (excluding built-ins that wrap the same functions)
+    global PLUGIN_LOADER
+    if PLUGIN_LOADER is not None:
+        plugin_handlers = PLUGIN_LOADER.get_handlers()
+        for provider_id, handler in plugin_handlers.items():
+            if provider_id not in dispatchers:
+                dispatchers[provider_id] = handler
+
+    return dispatchers
+
+
+def _get_plugin_loader() -> PluginLoader | None:
+    """Get PluginLoader if initialized, or initialize it."""
+    global PLUGIN_LOADER
+    if PLUGIN_LOADER is None:
+        PLUGIN_LOADER = PluginLoader.instance()
+        # Only load external plugins, not built-in wrappers
+        PLUGIN_LOADER.discover_and_load()
+        external_plugins = [p for p in PLUGIN_LOADER.list_plugins()
+                           if p not in {"codex", "gemini", "ollama", "claude_code"}]
+        if external_plugins:
+            logger.info(
+                "Loaded external plugins: %s",
+                external_plugins,
+            )
+    return PLUGIN_LOADER
+
+
+def _initialize_plugins() -> None:
+    """Initialize plugins at startup."""
+    _get_plugin_loader()
 
 
 async def _dispatch_ask_provider(
