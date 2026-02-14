@@ -22,6 +22,7 @@ class ErrorCategory(Enum):
     EXECUTION_ERROR = "execution_error"
     MODEL_NOT_FOUND = "model_not_found"
     CONFIGURATION_ERROR = "configuration_error"
+    TOKEN_LIMIT_EXCEEDED = "token_limit_exceeded"
 
 
 # Patterns for detecting error categories from error messages
@@ -53,6 +54,13 @@ ERROR_PATTERNS = {
         r"connection.?(refused|reset|closed|timeout)",
         r"dns.?fail",
         r"host.?unreachable",
+    ],
+    ErrorCategory.TOKEN_LIMIT_EXCEEDED: [
+        r"max.?tokens?",
+        r"token.?limit",
+        r"context.?(length|window|limit)",
+        r"output.?truncat",
+        r"maximum.?context",
     ],
     ErrorCategory.MODEL_NOT_FOUND: [
         r"model\s+[\w-]+\s+not\s+(found|exist)",
@@ -139,6 +147,7 @@ class ErrorInfo:
             ErrorCategory.EXECUTION_ERROR: "Check provider logs and configuration",
             ErrorCategory.MODEL_NOT_FOUND: "Verify model name and availability",
             ErrorCategory.CONFIGURATION_ERROR: "Fix provider configuration",
+            ErrorCategory.TOKEN_LIMIT_EXCEEDED: "Reduce prompt length or increase max_output_tokens",
         }
         return actions.get(category, "Contact support")
 

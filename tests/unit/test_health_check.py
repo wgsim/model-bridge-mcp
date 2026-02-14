@@ -1,18 +1,19 @@
-"""Unit tests for health_check tool (P2-2)."""
+"""Unit tests for enhanced health_check tool."""
 
 from __future__ import annotations
 
 import json
+import subprocess
+
 import pytest
 
 from model_bridge import main as main_module
 
 
 class TestHealthCheck:
-    """Test health_check tool."""
+    """Test enhanced health_check tool."""
 
     def test_health_check_returns_valid_json(self, monkeypatch):
-        """Test that health_check returns valid JSON."""
         monkeypatch.setattr(
             main_module,
             "_get_config",
@@ -21,14 +22,19 @@ class TestHealthCheck:
                     "codex": {"exec": ["codex"], "health": ["codex", "--version"]},
                     "gemini": {"exec": ["gemini"], "health": ["gemini", "--version"]},
                     "ollama": {"exec": ["ollama"], "health": ["ollama", "--version"]},
-                }
+                },
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
             },
         )
-
-        # Mock subprocess to avoid actual command execution
-        import subprocess
-        mock_result = type("MockResult", (), {"returncode": 0})()
-        monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: mock_result)
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="v1.0.0\n", stderr=""
+        )
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+        monkeypatch.setattr("shutil.which", lambda x: f"/usr/bin/{x}")
 
         result = main_module.health_check()
         payload = json.loads(result)
@@ -38,44 +44,57 @@ class TestHealthCheck:
         assert "timestamp" in payload
         assert "version" in payload
         assert "providers" in payload
+        assert "ollama_running" in payload
+        assert "config_defaults" in payload
 
     def test_health_check_reports_healthy_when_provider_available(self, monkeypatch):
-        """Test that status is healthy when at least one provider is available."""
         monkeypatch.setattr(
             main_module,
             "_get_config",
             lambda: {
                 "commands": {
                     "codex": {"exec": ["codex"], "health": ["codex", "--version"]},
-                }
+                },
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
             },
         )
-
-        import subprocess
-        mock_result = type("MockResult", (), {"returncode": 0})()
-        monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: mock_result)
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="v2.0\n", stderr=""
+        )
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+        monkeypatch.setattr("shutil.which", lambda x: f"/usr/bin/{x}")
 
         result = main_module.health_check()
         payload = json.loads(result)
 
         assert payload["status"] == "healthy"
         assert payload["providers"]["codex"]["available"] is True
+        assert "version" in payload["providers"]["codex"]
 
     def test_health_check_reports_degraded_when_no_provider_available(self, monkeypatch):
-        """Test that status is degraded when no provider is available."""
         monkeypatch.setattr(
             main_module,
             "_get_config",
             lambda: {
                 "commands": {
                     "codex": {"exec": ["codex"], "health": ["codex", "--version"]},
-                }
+                },
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
             },
         )
-
-        import subprocess
-        mock_result = type("MockResult", (), {"returncode": 1})()
-        monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: mock_result)
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr=""
+        )
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+        monkeypatch.setattr("shutil.which", lambda x: f"/usr/bin/{x}")
 
         result = main_module.health_check()
         payload = json.loads(result)
@@ -84,24 +103,26 @@ class TestHealthCheck:
         assert payload["providers"]["codex"]["available"] is False
 
     def test_health_check_handles_timeout(self, monkeypatch):
-        """Test that health_check handles command timeout gracefully."""
         monkeypatch.setattr(
             main_module,
             "_get_config",
             lambda: {
                 "commands": {
                     "codex": {"exec": ["codex"], "health": ["codex", "--version"]},
-                }
+                },
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
             },
         )
 
-        import subprocess
-        import subprocess as sp_module
-
         def raise_timeout(*args, **kwargs):
-            raise sp_module.TimeoutExpired(cmd="codex", timeout=5)
+            raise subprocess.TimeoutExpired(cmd="codex", timeout=5)
 
         monkeypatch.setattr(subprocess, "run", raise_timeout)
+        monkeypatch.setattr("shutil.which", lambda x: f"/usr/bin/{x}")
 
         result = main_module.health_check()
         payload = json.loads(result)
@@ -111,11 +132,17 @@ class TestHealthCheck:
         assert "error" in payload["providers"]["codex"]
 
     def test_health_check_handles_unconfigured_provider(self, monkeypatch):
-        """Test that health_check handles unconfigured providers."""
         monkeypatch.setattr(
             main_module,
             "_get_config",
-            lambda: {"commands": {}},
+            lambda: {
+                "commands": {},
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
+            },
         )
 
         result = main_module.health_check()
@@ -126,3 +153,71 @@ class TestHealthCheck:
             assert provider in payload["providers"]
             assert payload["providers"][provider]["available"] is False
             assert payload["providers"][provider].get("error") == "not configured"
+
+    def test_health_check_shows_install_hint_when_not_configured(self, monkeypatch):
+        monkeypatch.setattr(
+            main_module,
+            "_get_config",
+            lambda: {
+                "commands": {},
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
+            },
+        )
+
+        result = main_module.health_check()
+        payload = json.loads(result)
+
+        # At least some unconfigured providers should have install hints
+        has_hint = any(
+            "install_hint" in payload["providers"].get(p, {})
+            for p in ["codex", "gemini", "ollama", "claude_code"]
+        )
+        assert has_hint
+
+    def test_health_check_shows_cli_not_found(self, monkeypatch):
+        monkeypatch.setattr(
+            main_module,
+            "_get_config",
+            lambda: {
+                "commands": {
+                    "codex": {"exec": ["codex"], "health": ["codex", "--version"]},
+                },
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
+            },
+        )
+        monkeypatch.setattr("shutil.which", lambda x: None)
+
+        result = main_module.health_check()
+        payload = json.loads(result)
+
+        assert payload["providers"]["codex"]["available"] is False
+        assert "not found" in payload["providers"]["codex"].get("error", "").lower()
+
+    def test_health_check_includes_config_defaults(self, monkeypatch):
+        monkeypatch.setattr(
+            main_module,
+            "_get_config",
+            lambda: {
+                "commands": {},
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "test",
+                },
+            },
+        )
+
+        result = main_module.health_check()
+        payload = json.loads(result)
+
+        assert payload["config_defaults"]["subprocess_timeout_seconds"] == 120
+        assert payload["config_defaults"]["ollama_timeout_seconds"] == 300
+        assert payload["config_defaults"]["system_suffix_enabled"] is True

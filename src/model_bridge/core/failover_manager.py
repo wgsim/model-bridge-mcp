@@ -7,10 +7,37 @@ import json
 import logging
 import time
 import uuid
+from collections import deque
 from typing import Any, List, Protocol, Sequence
 
 from model_bridge.adapters.base import CLIAdapter
 from model_bridge.core.error_category import ErrorCategory, ErrorInfo, is_retryable
+
+_ERROR_BUFFER: deque[dict] = deque(maxlen=50)
+
+
+def record_error(
+    provider: str,
+    error_category: str,
+    raw_message: str,
+    timeout_value: float | None = None,
+) -> None:
+    """Record an error into the in-memory ring buffer."""
+    _ERROR_BUFFER.append(
+        {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "provider": provider,
+            "error_category": error_category,
+            "raw_message": raw_message[:500],
+            "timeout_value": timeout_value,
+        }
+    )
+
+
+def get_last_errors(count: int = 5) -> list[dict]:
+    """Return the last N errors from the ring buffer."""
+    n = max(1, min(count, len(_ERROR_BUFFER)))
+    return list(_ERROR_BUFFER)[-n:]
 
 
 class SanitizerProtocol(Protocol):
@@ -219,6 +246,8 @@ class FailoverManager:
 
         routing_log.append("    [FAILED]")
         errors_by_tier["primary"] = output
+        primary_error_info = ErrorInfo.from_message(output, primary)
+        record_error(primary, primary_error_info.category.value, output, timeout_seconds)
         if force_primary:
             self._emit_telemetry(
                 request_id=request_id,
@@ -263,6 +292,8 @@ class FailoverManager:
 
         routing_log.append("    [FAILED]")
         errors_by_tier["secondary"] = output
+        secondary_error_info = ErrorInfo.from_message(output, secondary)
+        record_error(secondary, secondary_error_info.category.value, output, timeout_seconds)
 
         if allow_tertiary and primary != "ollama":
             backup_model = self.config["models"]["ollama_final_backup_model"]
@@ -289,6 +320,8 @@ class FailoverManager:
                 return self._format_response(output, routing_log)
             routing_log.append("    [FAILED]")
             errors_by_tier["tertiary"] = output
+            tertiary_error_info = ErrorInfo.from_message(output, "ollama")
+            record_error("ollama", tertiary_error_info.category.value, output, timeout_seconds)
 
         self._emit_telemetry(
             request_id=request_id,

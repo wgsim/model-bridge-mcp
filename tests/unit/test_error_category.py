@@ -34,6 +34,7 @@ class TestErrorCategory:
             ErrorCategory.EXECUTION_ERROR,
             ErrorCategory.MODEL_NOT_FOUND,
             ErrorCategory.CONFIGURATION_ERROR,
+            ErrorCategory.TOKEN_LIMIT_EXCEEDED,
         }
         for category in non_retryable:
             assert is_retryable(category) is False
@@ -102,6 +103,27 @@ class TestErrorInfo:
         error = ErrorInfo.from_message("RATE LIMIT Exceeded", "test_provider")
         assert error.category == ErrorCategory.RATE_LIMITED
 
+    def test_categorize_token_limit_max_tokens(self):
+        """Test that max tokens error is categorized as token limit."""
+        error = ErrorInfo.from_message("max tokens exceeded", "test_provider")
+        assert error.category == ErrorCategory.TOKEN_LIMIT_EXCEEDED
+        assert error.is_retryable is False
+
+    def test_categorize_token_limit_context_length(self):
+        """Test that context length error is categorized as token limit."""
+        error = ErrorInfo.from_message("context length exceeded", "test_provider")
+        assert error.category == ErrorCategory.TOKEN_LIMIT_EXCEEDED
+
+    def test_categorize_token_limit_output_truncated(self):
+        """Test that output truncated error is categorized as token limit."""
+        error = ErrorInfo.from_message("output truncated due to length", "test_provider")
+        assert error.category == ErrorCategory.TOKEN_LIMIT_EXCEEDED
+
+    def test_categorize_token_limit_suggested_action(self):
+        """Test that token limit errors suggest reducing prompt length."""
+        error = ErrorInfo.from_message("token limit reached", "test_provider")
+        assert "max_output_tokens" in error.suggested_action.lower() or "reduce" in error.suggested_action.lower()
+
 
 class TestErrorInfoPropertyBased:
     """Property-based tests for ErrorInfo using Hypothesis."""
@@ -151,6 +173,9 @@ class TestErrorInfoPropertyBased:
             "malformed",
             "[SECURITY BLOCK]",
             "model xyz not found",
+            "max tokens exceeded",
+            "context length exceeded",
+            "output truncated",
         ])
     )
     def test_non_retryable_errors_are_always_marked_non_retryable(self, message):
