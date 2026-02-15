@@ -80,12 +80,68 @@ class PluginLoader:
         paths = self._get_plugin_paths(extra_paths)
         loaded_count = 0
 
+        # Load from directories
         for path in paths:
             if path.exists():
                 loaded_count += self._load_from_directory(path)
 
+        # Load from entry points
+        loaded_count += self._load_from_entry_points()
+
         self._loaded = True
         return loaded_count
+
+    def _load_from_entry_points(self) -> int:
+        """Load plugins from setuptools entry points.
+
+        Entry points should be registered under the 'model_bridge.plugins' group.
+
+        Example setup.py:
+            entry_points={
+                'model_bridge.plugins': [
+                    'my_provider = my_package.plugin:MyProviderPlugin',
+                ],
+            }
+        """
+        loaded = 0
+
+        try:
+            # Python 3.10+ uses importlib.metadata
+            from importlib.metadata import entry_points
+        except ImportError:
+            # Python 3.9 fallback
+            from importlib_metadata import entry_points
+
+        try:
+            # Get entry points for our group
+            eps = entry_points()
+            if hasattr(eps, 'select'):
+                # Python 3.10+ API
+                group = eps.select(group='model_bridge.plugins')
+            else:
+                # Python 3.9 API
+                group = eps.get('model_bridge.plugins', [])
+
+            for ep in group:
+                try:
+                    # Load the entry point - it should be a ProviderPlugin class
+                    plugin_class = ep.load()
+                    # If it's a class, instantiate and register
+                    if isinstance(plugin_class, type):
+                        plugin = plugin_class()
+                        self.register(plugin)
+                    else:
+                        # If it's already an instance, register directly
+                        self.register(plugin_class)
+                    loaded += 1
+                    logger.info("Loaded plugin from entry point: %s", ep.name)
+                except Exception as e:
+                    logger.error("Failed to load entry point %s: %s", ep.name, e)
+
+        except Exception as e:
+            logger.debug("No entry points found or error loading: %s", e)
+
+        return loaded
 
     def _get_plugin_paths(self, extra_paths: list[str] | None = None) -> list[Path]:
         """Get all paths to search for plugins."""

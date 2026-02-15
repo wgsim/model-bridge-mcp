@@ -26,6 +26,7 @@ from model_bridge.core.batch_executor import (
     parse_priority,
 )
 from model_bridge.core.failover_manager import FailoverManager, get_last_errors as _get_last_errors_from_buffer
+from model_bridge.core.plugin_loader import PluginLoader
 from model_bridge.core.provider_registry import ProviderRegistry, build_default_provider_registry
 from model_bridge.core.task_tracker import TaskTracker
 from model_bridge.core.prompt_cache import PromptCache
@@ -47,6 +48,7 @@ FAILOVER: Optional[FailoverManager] = None
 PROMPT_CACHE: Optional[PromptCache] = None
 SESSION_MEMORY: Optional[SessionMemory] = None
 PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
+PLUGIN_LOADER: Optional[PluginLoader] = None
 TASK_TRACKER: TaskTracker = TaskTracker()
 
 
@@ -134,14 +136,45 @@ def _get_provider_registry() -> ProviderRegistry:
     return PROVIDER_REGISTRY
 
 
+def _get_plugin_loader() -> PluginLoader | None:
+    """Get or initialize PluginLoader for external plugins."""
+    global PLUGIN_LOADER
+    if PLUGIN_LOADER is None:
+        PLUGIN_LOADER = PluginLoader.instance()
+        # Load external plugins (not built-in wrappers)
+        PLUGIN_LOADER.discover_and_load()
+        external_plugins = [
+            p for p in PLUGIN_LOADER.list_plugins()
+            if p not in {"codex", "gemini", "ollama", "claude_code"}
+        ]
+        if external_plugins:
+            logger.info("Loaded external plugins: %s", external_plugins)
+    return PLUGIN_LOADER
+
+
 def _get_provider_handlers() -> dict[str, Callable]:
-    """Get provider handler mappings for registry."""
-    return {
+    """Get provider handler mappings for registry.
+
+    Combines built-in providers with external plugins.
+    Built-in providers are always available; plugins add new providers.
+    """
+    # Start with built-in dispatchers
+    dispatchers = {
         "codex": ask_chatgpt_cli,
         "gemini": ask_gemini_cli,
         "ollama": ask_ollama,
         "claude_code": ask_claude_code,
     }
+
+    # Add external plugins (excluding built-ins that wrap the same functions)
+    loader = _get_plugin_loader()
+    if loader is not None:
+        plugin_handlers = loader.get_handlers()
+        for provider_id, handler in plugin_handlers.items():
+            if provider_id not in dispatchers:
+                dispatchers[provider_id] = handler
+
+    return dispatchers
 
 
 def _is_provider_configured(provider_id: str) -> bool:
