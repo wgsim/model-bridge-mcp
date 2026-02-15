@@ -1,5 +1,45 @@
 # Release Notes
 
+## v0.2.0 - 2026-02-15
+
+### Summary
+Completed all P1, P2, P3 roadmap items with comprehensive security and quality review.
+
+### Highlights
+
+**P1 - Foundation:**
+- Provider Registry with capability negotiation
+- Error Category system for intelligent retry
+- Test coverage: 297 tests (297 passed)
+
+**P2 - Performance:**
+- Weighted provider routing
+- Health check and telemetry tools
+- Batch execution with priority queue and rate limiting
+
+**P3 - Extensibility:**
+- Plugin architecture (`@register_provider`, `PluginLoader`)
+- Distributed caching (Disk, Redis)
+- Streaming infrastructure with MCP progress
+
+### Security
+- SAST scan: 0 HIGH/MEDIUM issues
+- Pylint score: 10.00/10
+- All hardcoded secrets removed
+- Path traversal and command injection protected
+
+### Files Changed
+- 50+ files added
+- 6,000+ lines of code
+- 37 test files
+
+### Verification
+```bash
+PYTHONPATH=src pytest tests -q  # 297 passed
+pylint src  # 10.00/10
+bandit -r src  # 0 HIGH/MEDIUM
+```
+
 ## v0.1.5 - 2026-02-12
 
 ### Summary
