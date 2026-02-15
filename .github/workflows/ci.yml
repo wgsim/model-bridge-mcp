@@ -23,7 +23,7 @@ jobs:
         shell: bash -l {0}
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pytest pre-commit
+          python -m pip install -e ".[dev]" pytest pre-commit
 
       - name: Run test suite
         shell: bash -l {0}
