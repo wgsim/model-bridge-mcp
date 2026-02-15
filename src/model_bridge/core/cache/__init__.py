@@ -21,12 +21,14 @@ Usage:
 """
 
 from model_bridge.core.cache.backend import CacheBackend, InMemoryCache, PromptCache
+from model_bridge.core.cache.disk_cache import DiskCache
 from model_bridge.core.cache.factory import create_cache, get_cache_backend_name
 
 __all__ = [
     "CacheBackend",
     "InMemoryCache",
     "PromptCache",
+    "DiskCache",
     "create_cache",
     "get_cache_backend_name",
 ]
