@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from model_bridge.plugins.base import PluginCapabilities, ProviderPlugin
+from model_bridge.plugins.base import ProviderPlugin
 from model_bridge.core.provider_registry import ProviderCapabilities, ProviderSpec, ProviderRegistry
 
 if TYPE_CHECKING:
@@ -285,7 +284,6 @@ class PluginLoader:
             ProviderRegistry with all loaded plugins
         """
         registry = ProviderRegistry()
-        commands_cfg = config.get("commands", {})
 
         for provider_id, plugin in self._plugins.items():
             caps = plugin.capabilities

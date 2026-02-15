@@ -11,7 +11,7 @@ from collections import deque
 from typing import Any, List, Protocol, Sequence
 
 from model_bridge.adapters.base import CLIAdapter
-from model_bridge.core.error_category import ErrorCategory, ErrorInfo, is_retryable
+from model_bridge.core.error_category import ErrorInfo
 
 _ERROR_BUFFER: deque[dict] = deque(maxlen=50)
 

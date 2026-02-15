@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import random
@@ -13,7 +12,7 @@ import shutil
 import subprocess
 import inspect
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 from mcp.server.fastmcp import FastMCP, Context
 
@@ -22,7 +21,6 @@ from model_bridge.config.config_loader import load_config
 from model_bridge.core.batch_executor import (
     BatchExecutor,
     PrioritizedJob,
-    Priority,
     parse_priority,
 )
 from model_bridge.core.failover_manager import FailoverManager, get_last_errors as _get_last_errors_from_buffer
