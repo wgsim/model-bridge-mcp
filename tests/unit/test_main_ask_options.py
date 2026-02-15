@@ -143,6 +143,13 @@ def test_ask_claude_code_supports_json_and_force_model(monkeypatch):
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
     monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
 
+    # Mock adapter to pass preflight check
+    class FakeAdapter:
+        def preflight_check(self, provider):
+            return True, ""
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeAdapter())
+
     out = asyncio.run(
         main_module.ask_claude_code(
             "review me",
