@@ -11,6 +11,7 @@ import json
 import shutil
 import subprocess
 import inspect
+from importlib.metadata import PackageNotFoundError, version as package_version
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -48,6 +49,15 @@ SESSION_MEMORY: Optional[SessionMemory] = None
 PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
 PLUGIN_LOADER: Optional[PluginLoader] = None
 TASK_TRACKER: TaskTracker = TaskTracker()
+_PACKAGE_NAME = "model-bridge-mcp"
+
+
+def _get_model_bridge_version() -> str:
+    """Return installed package version for runtime health reporting."""
+    try:
+        return package_version(_PACKAGE_NAME)
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
@@ -1769,7 +1779,7 @@ def health_check() -> str:
     payload = {
         "status": "healthy" if any_available else "degraded",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "version": "0.1.4",
+        "version": _get_model_bridge_version(),
         "providers": providers_status,
         "ollama_running": ollama_running,
         "config_defaults": {

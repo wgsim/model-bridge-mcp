@@ -221,3 +221,23 @@ class TestHealthCheck:
         assert payload["config_defaults"]["subprocess_timeout_seconds"] == 120
         assert payload["config_defaults"]["ollama_timeout_seconds"] == 300
         assert payload["config_defaults"]["system_suffix_enabled"] is True
+
+    def test_health_check_uses_runtime_package_version(self, monkeypatch):
+        monkeypatch.setattr(
+            main_module,
+            "_get_config",
+            lambda: {
+                "commands": {},
+                "runtime": {
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
+            },
+        )
+        monkeypatch.setattr(main_module, "_get_model_bridge_version", lambda: "9.9.9")
+
+        result = main_module.health_check()
+        payload = json.loads(result)
+
+        assert payload["version"] == "9.9.9"
