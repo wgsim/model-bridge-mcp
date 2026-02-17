@@ -16,6 +16,7 @@ class TestSetConfig:
                 "codex": {"exec": ["codex"], "health": ["codex", "--version"]},
             },
             "runtime": {
+                "transport_mode": "subprocess",
                 "subprocess_timeout_seconds": 120.0,
                 "ollama_timeout_seconds": 300.0,
                 "system_suffix": "",
@@ -37,6 +38,7 @@ class TestSetConfig:
         result = main_module.set_config(timeout_seconds=180.0)
         payload = json.loads(result)
         assert payload["status"] == "ok"
+        assert payload["effective"]["transport_mode"] == "subprocess"
         assert payload["changes"]["subprocess_timeout_seconds"] == 180.0
         assert payload["effective"]["subprocess_timeout_seconds"] == 180.0
 
@@ -47,6 +49,7 @@ class TestSetConfig:
         result = main_module.set_config(ollama_timeout_seconds=600.0)
         payload = json.loads(result)
         assert payload["status"] == "ok"
+        assert payload["effective"]["transport_mode"] == "subprocess"
         assert payload["changes"]["ollama_timeout_seconds"] == 600.0
         assert payload["effective"]["ollama_timeout_seconds"] == 600.0
 
@@ -72,6 +75,7 @@ class TestSetConfig:
         payload = json.loads(result)
         assert payload["status"] == "ok"
         assert payload["changes"] == {}
+        assert payload["effective"]["transport_mode"] == "subprocess"
 
     def test_set_config_updates_adapter_timeout(self, monkeypatch):
         config = self._mock_config()
@@ -85,3 +89,35 @@ class TestSetConfig:
 
         main_module.set_config(timeout_seconds=250.0)
         assert adapter.timeout_seconds == 250.0
+
+    def test_set_config_transport_mode_rebuilds_adapter(self, monkeypatch):
+        config = self._mock_config()
+        monkeypatch.setattr(main_module, "_get_config", lambda: config)
+
+        class FakeAdapter:
+            timeout_seconds = 120.0
+
+        class FakeFailover:
+            def __init__(self, adapter, sanitizer, config):  # pylint: disable=unused-argument
+                self.adapter = adapter
+
+        monkeypatch.setattr(main_module, "build_adapter", lambda cfg, env=None: FakeAdapter())
+        monkeypatch.setattr(main_module, "FailoverManager", FakeFailover)
+
+        result = main_module.set_config(transport_mode="sdk")
+        payload = json.loads(result)
+
+        assert payload["status"] == "ok"
+        assert payload["changes"]["transport_mode"] == "sdk"
+        assert payload["effective"]["transport_mode"] == "sdk"
+        assert config["runtime"]["transport_mode"] == "sdk"
+
+    def test_set_config_rejects_invalid_transport_mode(self, monkeypatch):
+        config = self._mock_config()
+        monkeypatch.setattr(main_module, "_get_config", lambda: config)
+
+        result = main_module.set_config(transport_mode="cli")
+        payload = json.loads(result)
+
+        assert payload["status"] == "error"
+        assert "transport_mode must be one of" in payload["error"]

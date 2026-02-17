@@ -85,6 +85,7 @@ security:
 
 runtime:
   system_suffix: "\n\n[SYSTEM INSTRUCTION: Return raw code/text only. Do NOT use emojis. Do NOT use markdown code blocks.]"
+  transport_mode: "subprocess"
   subprocess_timeout_seconds: 120
   ollama_timeout_seconds: 300
   ask_defaults:

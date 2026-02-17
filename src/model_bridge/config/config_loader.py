@@ -6,7 +6,7 @@ import argparse
 import json
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -138,6 +138,7 @@ class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     system_suffix: str
     apply_system_suffix: RuntimeApplySystemSuffix
+    transport_mode: Literal["subprocess", "sdk"] = "subprocess"
     subprocess_timeout_seconds: float = Field(default=120.0, gt=0)
     ollama_timeout_seconds: float = Field(default=300.0, gt=0)
     ask_defaults: AskDefaultsConfig = Field(default_factory=AskDefaultsConfig)

@@ -31,6 +31,7 @@ The default configuration file is `src/model_bridge/config/default.yaml`.
 - `security`: block patterns and sensitive paths
 - `runtime.system_suffix`: CLI prompt suffix
 - `runtime.apply_system_suffix`: per-service suffix application policy
+- `runtime.transport_mode`: `subprocess` (default) or `sdk` (scaffold)
 
 Config loader verification:
 ```bash
@@ -73,6 +74,12 @@ conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -c "from model
 Runtime initialization note:
 - Runtime dependencies (`config`, `adapter`, `failover`) are initialized lazily on first tool call.
 - Importing `model_bridge.main` no longer eagerly loads runtime configuration.
+- `runtime.transport_mode=sdk` currently supports direct API for `codex`, `gemini`, `claude_code`, and `ollama`.
+- `codex` SDK auth priority: `OPENAI_API_KEY` (recommended) -> `OPENAI_ACCESS_TOKEN` (manual OAuth token path).
+- `gemini` SDK auth priority: `GEMINI_API_KEY` (recommended) -> `GOOGLE_API_KEY`.
+- `claude_code` SDK auth: `ANTHROPIC_API_KEY` -> `ANTHROPIC_OAUTH_ACCESS_TOKEN`/`ANTHROPIC_ACCESS_TOKEN` (model alias override via `ANTHROPIC_MODEL*` env supported).
+- `ollama` SDK auth is not required (local HTTP endpoint; configurable by `OLLAMA_BASE_URL`).
+- OAuth refresh automation (OpenAI/Gemini/Anthropic): set `<PROVIDER>_OAUTH_TOKEN_FILE` with token metadata and optionally `<PROVIDER>_OAUTH_*` refresh env (`TOKEN_URL`, `REFRESH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `SCOPE`).
 
 ### MCP run
 ```bash

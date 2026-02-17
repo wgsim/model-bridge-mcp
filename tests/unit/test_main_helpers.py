@@ -6,6 +6,7 @@ import time
 import pytest
 
 from model_bridge import main as main_module
+from model_bridge.adapters.sdk_adapter import SDKAdapter
 
 
 @pytest.fixture
@@ -97,6 +98,42 @@ def test_runtime_is_initialized_lazily_once(monkeypatch):
     assert isinstance(main_module._get_adapter(), _Adapter)
     assert isinstance(main_module._get_failover(), _Failover)
     assert calls["count"] == 1
+
+
+def test_build_runtime_uses_sdk_adapter_when_transport_mode_sdk():
+    config = {
+        "commands": {},
+        "security": {"block_patterns": ["rm"], "sensitive_paths": ["/etc/"]},
+        "runtime": {
+            "system_suffix": "",
+            "transport_mode": "sdk",
+            "apply_system_suffix": {
+                "codex": True,
+                "gemini": True,
+                "ollama": False,
+                "claude_code": True,
+            },
+            "subprocess_timeout_seconds": 120.0,
+        },
+        "models": {
+            "ollama_default_model": "gpt-oss:20b",
+            "ollama_aliases": {"default": "gpt-oss:20b"},
+            "ollama_catalog": ["gpt-oss:20b"],
+            "ollama_final_backup_model": "gpt-oss:20b",
+            "ollama_local_fallback_chain": ["default"],
+        },
+        "routing": {
+            "default_chains": {
+                "ask_chatgpt_cli": ["codex", "gemini", "ollama"],
+                "ask_gemini_cli": ["gemini", "codex", "ollama"],
+                "ask_ollama_cloud_fallback": ["codex", "gemini"],
+            }
+        },
+    }
+
+    _, adapter, _ = main_module.build_runtime(config=config)
+
+    assert isinstance(adapter, SDKAdapter)
 
 
 def test_ask_claude_code_returns_setup_error_when_unconfigured(monkeypatch):
