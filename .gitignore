@@ -9,3 +9,4 @@ dist/
 .env
 .worktrees/
 .hypothesis/
+.DS_Store
