@@ -102,6 +102,8 @@ class SDKAdapter(CLIAdapter):
             fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(record, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            # os.open(mode=0o600) does not tighten permissions on pre-existing files.
+            os.chmod(path, 0o600)
         except OSError:
             return
 

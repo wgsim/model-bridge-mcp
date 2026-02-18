@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import stat
 import time
 
 from model_bridge.adapters.sdk_adapter import SDKAdapter
@@ -452,3 +454,5 @@ def test_resolve_oauth_access_token_refreshes_expired_file(tmp_path, monkeypatch
     persisted = json.loads(token_file.read_text(encoding="utf-8"))
     assert persisted["access_token"] == "new-token"
     assert persisted["refresh_token"] == "refresh-2"
+    if os.name != "nt":
+        assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
