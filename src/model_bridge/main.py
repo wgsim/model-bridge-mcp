@@ -959,10 +959,8 @@ async def ask_chatgpt_cli(
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
 
-    # P2-1: Use weighted routing if configured
-    primary_provider = _select_provider_by_weight("ask_chatgpt_cli")
-    if primary_provider is None:
-        primary_provider = "codex"
+    # Keep primary aligned with function identity: ask_chatgpt_cli => codex.
+    primary_provider = "codex"
     secondary_provider = "gemini"
 
     response = ""
@@ -1026,10 +1024,8 @@ async def ask_gemini_cli(
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
 
-    # P2-1: Use weighted routing if configured
-    primary_provider = _select_provider_by_weight("ask_gemini_cli")
-    if primary_provider is None:
-        primary_provider = "gemini"
+    # Keep primary aligned with function identity: ask_gemini_cli => gemini.
+    primary_provider = "gemini"
     secondary_provider = "codex"
 
     response = ""

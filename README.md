@@ -233,7 +233,7 @@ Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code")` to in
   - `models.claude_code_model_catalog`
 - Each non-ollama provider includes `model_flag="--model"` and configured command metadata.
 - Current default catalogs:
-  - `codex`: `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.3-codex`
+  - `codex`: `gpt-5.3-codex`, `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.2-codex`
   - `gemini`: `gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3-pro-preview`
   - `claude_code`: `haiku`, `sonnet`, `opus`
 - Note: some Gemini preview models may require additional internal flags/account enablement.
