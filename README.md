@@ -31,6 +31,35 @@ The default configuration file is `src/model_bridge/config/default.yaml`.
 - `security`: block patterns and sensitive paths
 - `runtime.system_suffix`: CLI prompt suffix
 - `runtime.apply_system_suffix`: per-service suffix application policy
+- `runtime.extra_path`: additional PATH directories for CLI discovery (see below)
+
+### CLI Path Discovery
+
+MCP server automatically discovers CLI tools installed via version managers:
+
+**Auto-detected paths:**
+- **Node.js**: nvm (`~/.nvm/versions/node/*/bin`), fnm, volta
+- **Python**: pyenv, conda (miniconda3/anaconda3)
+- **Ruby**: rbenv, rvm
+- **Rust**: cargo (`~/.cargo/bin`)
+- **Go**: `~/.go/bin`, `~/go/bin`
+- **User local**: `~/.local/bin`
+
+**User-specified paths (highest priority):**
+
+If auto-discovery fails or you need custom paths, add them in config:
+
+```yaml
+runtime:
+  extra_path:
+    - /custom/path/to/bin
+    - ~/another/path
+```
+
+Priority order (highest first):
+1. User-specified `extra_path` from config
+2. Auto-discovered version manager paths
+3. System PATH at MCP server startup
 
 Config loader verification:
 ```bash

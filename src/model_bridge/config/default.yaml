@@ -87,6 +87,10 @@ runtime:
   system_suffix: "\n\n[SYSTEM INSTRUCTION: Return raw code/text only. Do NOT use emojis. Do NOT use markdown code blocks.]"
   subprocess_timeout_seconds: 120
   ollama_timeout_seconds: 300
+  # Additional PATH directories for CLI discovery (highest priority)
+  # Useful when CLIs are installed in non-standard locations
+  # Example: extra_path: ["~/custom/bin", "/opt/tools/bin"]
+  extra_path: []
   ask_defaults:
     timeout_seconds: 120
     max_output_tokens: 0

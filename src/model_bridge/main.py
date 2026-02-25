@@ -67,12 +67,14 @@ def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapte
         block_patterns=resolved_config["security"]["block_patterns"],
         sensitive_paths=resolved_config["security"]["sensitive_paths"],
     )
+    extra_path = resolved_config.get("runtime", {}).get("extra_path")
     adapter = SubprocessAdapter(
         cli_config=resolved_config["commands"],
         env=os.environ.copy(),
         system_suffix=resolved_config["runtime"]["system_suffix"],
         apply_system_suffix_for=resolved_config["runtime"]["apply_system_suffix"],
         timeout_seconds=resolved_config["runtime"]["subprocess_timeout_seconds"],
+        extra_path=extra_path,
     )
     failover = FailoverManager(adapter=adapter, sanitizer=SecuritySanitizer, config=resolved_config)
     return resolved_config, adapter, failover
@@ -1704,6 +1706,14 @@ def health_check() -> str:
     config = _get_config()
     commands = config.get("commands", {})
     runtime = config.get("runtime", {})
+
+    # Sync PATH with adapter's expanded PATH (includes version manager paths)
+    try:
+        adapter = _get_adapter()
+        if adapter and adapter.env.get("PATH"):
+            os.environ["PATH"] = adapter.env["PATH"]
+    except Exception:
+        pass
 
     providers_status = {}
     for provider in ["codex", "gemini", "ollama", "claude_code"]:
