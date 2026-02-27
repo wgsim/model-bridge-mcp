@@ -61,6 +61,45 @@ Priority order (highest first):
 2. Auto-discovered version manager paths
 3. System PATH at MCP server startup
 
+### Environment Variables
+
+Some CLI providers require environment variables for authentication (e.g., Google Cloud Vertex AI). MCP servers may not inherit shell profile variables due to non-interactive shell execution.
+
+Configure required environment variables:
+
+```yaml
+runtime:
+  extra_env_vars:
+    GOOGLE_CLOUD_PROJECT: "your-project-id"
+    GOOGLE_CLOUD_LOCATION: "us-central1"
+    # Other provider vars as needed:
+    # OPENAI_API_KEY: "sk-..."
+    # ANTHROPIC_API_KEY: "sk-ant-..."
+```
+
+Priority order (highest first):
+1. User-specified `extra_env_vars` from config
+2. Auto-discovered from login shell (if accessible)
+3. MCP server process environment
+
+### Local Config File
+
+For machine-specific settings (API keys, project IDs, paths), use a local config file that won't be committed to git:
+
+**Location**: `~/.model_bridge/local.yaml`
+
+```yaml
+# ~/.model_bridge/local.yaml
+runtime:
+  extra_env_vars:
+    GOOGLE_CLOUD_PROJECT: "your-project-id"
+    GOOGLE_CLOUD_LOCATION: "us-central1"
+  extra_path:
+    - ~/custom/bin
+```
+
+**Merge behavior**: Local config is deep-merged on top of the default config. Only specify values you want to override.
+
 Config loader verification:
 ```bash
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridge.config.config_loader --pretty'

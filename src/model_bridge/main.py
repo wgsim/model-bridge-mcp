@@ -67,7 +67,9 @@ def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapte
         block_patterns=resolved_config["security"]["block_patterns"],
         sensitive_paths=resolved_config["security"]["sensitive_paths"],
     )
-    extra_path = resolved_config.get("runtime", {}).get("extra_path")
+    runtime_config = resolved_config.get("runtime", {})
+    extra_path = runtime_config.get("extra_path")
+    extra_env_vars = runtime_config.get("extra_env_vars")
     adapter = SubprocessAdapter(
         cli_config=resolved_config["commands"],
         env=os.environ.copy(),
@@ -75,6 +77,7 @@ def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapte
         apply_system_suffix_for=resolved_config["runtime"]["apply_system_suffix"],
         timeout_seconds=resolved_config["runtime"]["subprocess_timeout_seconds"],
         extra_path=extra_path,
+        extra_env_vars=extra_env_vars,
     )
     failover = FailoverManager(adapter=adapter, sanitizer=SecuritySanitizer, config=resolved_config)
     return resolved_config, adapter, failover

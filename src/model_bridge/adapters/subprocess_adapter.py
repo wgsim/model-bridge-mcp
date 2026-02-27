@@ -50,10 +50,91 @@ _VERSION_MANAGER_DIRS = [
     ("~/.local", "bin"),
 ]
 
+# Environment variables to inherit from login shell for provider authentication
+_PROVIDER_ENV_VARS = [
+    # Google Cloud / Gemini
+    "GOOGLE_API_KEY",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    # OpenAI / Codex
+    "OPENAI_API_KEY",
+    # Anthropic / Claude
+    "ANTHROPIC_API_KEY",
+    # AWS
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_REGION",
+    # Azure
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+]
+
 
 def _is_safe_command_name(name: str) -> bool:
     """Validate command name contains only safe characters to prevent injection."""
     return bool(re.match(r"^[a-zA-Z0-9_-]+$", name))
+
+
+def _is_safe_env_var_name(name: str) -> bool:
+    """Validate env var name contains only safe characters."""
+    return bool(re.match(r"^[A-Z][A-Z0-9_]*$", name))
+
+
+def _discover_provider_env_vars(timeout: float = 3.0) -> dict[str, str]:
+    """
+    Discover provider authentication env vars from login shell.
+
+    This allows MCP server to inherit authentication that users have
+    configured in their shell profiles (.bashrc, .zshrc, etc.).
+
+    Security considerations:
+    - Only reads whitelisted env vars (_PROVIDER_ENV_VARS)
+    - Values are never logged
+    - Used only for subprocess execution within user's own system
+
+    Args:
+        timeout: Maximum time to wait for shell response
+
+    Returns:
+        Dict of env var name -> value (only non-empty values)
+    """
+    discovered: dict[str, str] = {}
+
+    for shell in _LOGIN_SHELLS:
+        try:
+            # Build a command that prints all whitelisted env vars
+            # Format: NAME=value (one per line, only if set)
+            var_checks = " || ".join(
+                f'[ -n "${var}" ] && echo "{var}=${var}"'
+                for var in _PROVIDER_ENV_VARS
+            )
+            cmd = f'{var_checks}'
+
+            result = subprocess.run(
+                [shell, "-lc", cmd],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().splitlines():
+                    if "=" in line:
+                        name, value = line.split("=", 1)
+                        if _is_safe_env_var_name(name) and value:
+                            discovered[name] = value
+                break  # Success, no need to try other shells
+
+        except subprocess.TimeoutExpired:
+            logger.debug("Login shell %s timed out while discovering env vars", shell)
+        except FileNotFoundError:
+            logger.debug("Shell %s not found, trying next", shell)
+        except Exception as e:
+            logger.debug("Error using %s to discover env vars: %s", shell, e)
+
+    return discovered
 
 
 def _discover_cli_path_via_login_shell(command: str, timeout: float = 3.0) -> str | None:
@@ -233,6 +314,7 @@ class SubprocessAdapter(CLIAdapter):
         apply_system_suffix_for: Mapping[str, bool] | None = None,
         timeout_seconds: float | None = None,
         extra_path: Sequence[str] | None = None,
+        extra_env_vars: Mapping[str, str] | None = None,
     ) -> None:
         self.cli_config = cli_config
         self.env = dict(env) if env is not None else os.environ.copy()
@@ -241,6 +323,7 @@ class SubprocessAdapter(CLIAdapter):
         self.timeout_seconds = timeout_seconds
         self._preflight_cache: dict[str, tuple[bool, str, float]] = {}
         self._extra_path = list(extra_path) if extra_path else None
+        self._extra_env_vars = dict(extra_env_vars) if extra_env_vars else None
 
         # Discover CLI paths and expand PATH
         self._expand_path_with_cli_discovery()
@@ -267,6 +350,22 @@ class SubprocessAdapter(CLIAdapter):
         if expanded_path != current_path:
             self.env["PATH"] = expanded_path
             logger.info("PATH expanded with discovered CLI directories")
+
+        # Discover provider authentication env vars from login shell
+        self._discover_provider_env_vars()
+
+        # Apply user-specified extra_env_vars (highest priority)
+        if self._extra_env_vars:
+            self.env.update(self._extra_env_vars)
+            logger.info("Applied %d user-configured env vars", len(self._extra_env_vars))
+
+    def _discover_provider_env_vars(self) -> None:
+        """Discover and inject provider authentication env vars from login shell."""
+        discovered = _discover_provider_env_vars()
+        if discovered:
+            self.env.update(discovered)
+            # Log without exposing values
+            logger.info("Discovered %d provider env vars from login shell", len(discovered))
 
     _PREFLIGHT_CACHE_TTL = 60.0
 
