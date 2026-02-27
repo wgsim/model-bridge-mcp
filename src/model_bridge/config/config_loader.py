@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -242,9 +243,10 @@ def load_config(config_path: str | None = None) -> dict[str, Any]:
         try:
             local_raw = _load_yaml_from_path(_LOCAL_CONFIG_PATH)
             raw = _deep_merge(raw, local_raw)
-        except ConfigError:
-            # Log warning but don't fail - local config is optional
-            pass
+        except ConfigError as e:
+            # Local config is optional, but warn user if it's malformed
+            logger = logging.getLogger(__name__)
+            logger.warning("Failed to load local config %s: %s", _LOCAL_CONFIG_PATH, e)
 
     return normalize_config(raw)
 

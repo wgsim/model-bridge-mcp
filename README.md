@@ -100,6 +100,8 @@ runtime:
 
 **Merge behavior**: Local config is deep-merged on top of the default config. Only specify values you want to override.
 
+**Note**: List fields (like `extra_path`) are **replaced**, not concatenated. If default has `extra_path: ["/a"]` and local has `extra_path: ["~/b"]`, the result is `["~/b"]` only.
+
 Config loader verification:
 ```bash
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridge.config.config_loader --pretty'
