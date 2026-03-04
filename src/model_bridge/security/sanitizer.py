@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Tuple
 
 
 class SecuritySanitizer:
@@ -35,7 +34,7 @@ class SecuritySanitizer:
         cls.SENSITIVE_PATHS = list(sensitive_paths)
 
     @classmethod
-    def inspect(cls, prompt: str, mode: str = "execution") -> Tuple[bool, str]:
+    def inspect(cls, prompt: str, mode: str = "execution") -> tuple[bool, str]:
         normalized_mode = (mode or "execution").strip().lower()
         if normalized_mode not in {"execution", "analysis"}:
             logging.getLogger("model_bridge.security").warning(

@@ -4,13 +4,7 @@ These plugins wrap the existing providers (codex, gemini, ollama, claude_code)
 to demonstrate the plugin architecture while maintaining backward compatibility.
 """
 
-import asyncio
-from typing import TYPE_CHECKING
-
 from model_bridge.plugins import ProviderPlugin, PluginCapabilities, register_provider
-
-if TYPE_CHECKING:
-    pass
 
 
 @register_provider
