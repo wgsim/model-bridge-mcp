@@ -44,6 +44,7 @@ mcp = FastMCP("Model Bridge MCP")
 CONFIG: Optional[dict] = None
 ADAPTER: Optional[SubprocessAdapter] = None
 FAILOVER: Optional[FailoverManager] = None
+SANITIZER: Optional[SecuritySanitizer] = None
 PROMPT_CACHE: Optional[PromptCache] = None
 SESSION_MEMORY: Optional[SessionMemory] = None
 PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
@@ -60,10 +61,10 @@ def _get_model_bridge_version() -> str:
         return "unknown"
 
 
-def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
+def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager, SecuritySanitizer]:
     """Build runtime dependencies for production and tests."""
     resolved_config = config if config is not None else load_config()
-    SecuritySanitizer.configure(
+    sanitizer = SecuritySanitizer(
         block_patterns=resolved_config["security"]["block_patterns"],
         sensitive_paths=resolved_config["security"]["sensitive_paths"],
     )
@@ -79,15 +80,15 @@ def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapte
         extra_path=extra_path,
         extra_env_vars=extra_env_vars,
     )
-    failover = FailoverManager(adapter=adapter, sanitizer=SecuritySanitizer, config=resolved_config)
-    return resolved_config, adapter, failover
+    failover = FailoverManager(adapter=adapter, sanitizer=sanitizer, config=resolved_config)
+    return resolved_config, adapter, failover, sanitizer
 
 
 def _ensure_runtime() -> None:
-    global CONFIG, ADAPTER, FAILOVER
+    global CONFIG, ADAPTER, FAILOVER, SANITIZER
     if CONFIG is not None and ADAPTER is not None and FAILOVER is not None:
         return
-    CONFIG, ADAPTER, FAILOVER = build_runtime()
+    CONFIG, ADAPTER, FAILOVER, SANITIZER = build_runtime()
 
 
 def _get_config() -> dict:
@@ -106,6 +107,12 @@ def _get_failover() -> FailoverManager:
     _ensure_runtime()
     assert FAILOVER is not None
     return FAILOVER
+
+
+def _get_sanitizer() -> SecuritySanitizer:
+    _ensure_runtime()
+    assert SANITIZER is not None
+    return SANITIZER
 
 
 def _get_runtime_defaults() -> dict:
@@ -1095,7 +1102,7 @@ async def ask_ollama(
         effective_timeout, max_output_tokens, response_format, verbosity, stream
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
-    is_safe, sec_msg = SecuritySanitizer.inspect(prompt, mode="execution")
+    is_safe, sec_msg = _get_sanitizer().inspect(prompt, mode="execution")
     if not is_safe:
         return _finalize_response(sec_msg, "ollama", options)
 

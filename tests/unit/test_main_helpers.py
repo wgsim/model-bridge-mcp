@@ -84,14 +84,18 @@ def test_runtime_is_initialized_lazily_once(monkeypatch):
     class _Failover:
         pass
 
+    class _Sanitizer:
+        pass
+
     def _fake_build_runtime(config=None):
         calls["count"] += 1
-        return fake_config, _Adapter(), _Failover()
+        return fake_config, _Adapter(), _Failover(), _Sanitizer()
 
     monkeypatch.setattr(main_module, "build_runtime", _fake_build_runtime)
     monkeypatch.setattr(main_module, "CONFIG", None)
     monkeypatch.setattr(main_module, "ADAPTER", None)
     monkeypatch.setattr(main_module, "FAILOVER", None)
+    monkeypatch.setattr(main_module, "SANITIZER", None)
 
     assert main_module._get_config() is fake_config
     assert isinstance(main_module._get_adapter(), _Adapter)
