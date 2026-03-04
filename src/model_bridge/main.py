@@ -17,6 +17,7 @@ from typing import Callable, Optional
 
 from mcp.server.fastmcp import FastMCP, Context
 
+from model_bridge.adapters import INSTALL_HINTS
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
 from model_bridge.config.config_loader import load_config
 from model_bridge.core.batch_executor import (
@@ -1690,12 +1691,6 @@ def list_runtime_resources(model: str = "default", requested_max_concurrency: in
     return json.dumps(payload, ensure_ascii=False)
 
 
-_PROVIDER_INSTALL_HINTS = {
-    "codex": "brew install --cask codex (or npm install -g @openai/codex)",
-    "gemini": "brew install gemini-cli (or npm install -g @anthropic/gemini-cli)",
-    "ollama": "brew install --cask ollama (or https://ollama.ai/download)",
-    "claude_code": "brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
-}
 
 
 @mcp.tool()
@@ -1729,7 +1724,7 @@ def health_check() -> str:
                 "available": False,
                 "error": "not configured",
             }
-            hint = _PROVIDER_INSTALL_HINTS.get(provider)
+            hint = INSTALL_HINTS.get(provider)
             if hint:
                 entry["install_hint"] = hint
             providers_status[provider] = entry
@@ -1742,7 +1737,7 @@ def health_check() -> str:
                 "available": False,
                 "error": f"CLI '{bin_name}' not found in PATH",
             }
-            hint = _PROVIDER_INSTALL_HINTS.get(provider)
+            hint = INSTALL_HINTS.get(provider)
             if hint:
                 entry["install_hint"] = hint
             providers_status[provider] = entry

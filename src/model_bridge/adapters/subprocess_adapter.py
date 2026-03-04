@@ -16,11 +16,12 @@ from .base import CLIAdapter
 
 logger = logging.getLogger("model_bridge.subprocess_adapter")
 
-_INSTALL_HINTS: dict[str, str] = {
-    "codex": "Install: brew install --cask codex (or npm install -g @openai/codex)",
-    "gemini": "Install: brew install gemini-cli (or npm install -g @anthropic/gemini-cli)",
-    "ollama": "Install: brew install --cask ollama (or https://ollama.ai/download)",
-    "claude": "Install: brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
+INSTALL_HINTS: dict[str, str] = {
+    "codex": "brew install --cask codex (or npm install -g @openai/codex)",
+    "gemini": "brew install gemini-cli (or npm install -g @anthropic/gemini-cli)",
+    "ollama": "brew install --cask ollama (or https://ollama.ai/download)",
+    "claude": "brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
+    "claude_code": "brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
 }
 
 # Shells to try for login shell discovery (in order of preference)
@@ -386,8 +387,8 @@ class SubprocessAdapter(CLIAdapter):
             return result
 
         if not shutil.which(cmd_base[0]):
-            hint = _INSTALL_HINTS.get(cmd_base[0], "")
-            hint_suffix = f" {hint}" if hint else ""
+            hint = INSTALL_HINTS.get(cmd_base[0], "")
+            hint_suffix = f" Install: {hint}" if hint else ""
             result = (False, f"Command '{cmd_base[0]}' not found.{hint_suffix}")
             self._preflight_cache[service_name] = (*result, now)
             return result
@@ -446,8 +447,8 @@ class SubprocessAdapter(CLIAdapter):
         if not cmd_base:
             return False, f"Configuration Error: No command defined for {service_name}", [], ""
         if not shutil.which(cmd_base[0]):
-            hint = _INSTALL_HINTS.get(cmd_base[0], "")
-            hint_suffix = f" {hint}" if hint else ""
+            hint = INSTALL_HINTS.get(cmd_base[0], "")
+            hint_suffix = f" Install: {hint}" if hint else ""
             return False, f"System Error: Command '{cmd_base[0]}' not found.{hint_suffix}", [], ""
         if self.apply_system_suffix_for.get(service_name, True):
             full_input = input_text + self.system_suffix
