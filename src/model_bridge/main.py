@@ -929,6 +929,58 @@ def _list_static_provider_models(provider_id: str) -> dict:
     }
 
 
+async def _ask_with_failover(
+    prompt: str,
+    *,
+    default_primary: str,
+    secondary: str,
+    mode: str,
+    tool_name: str,
+    weighted_chain_name: str | None,
+    save_path: str | None,
+    force_model: bool,
+    model: str | None,
+    timeout_seconds: float | None,
+    max_output_tokens: int | None,
+    response_format: str | None,
+    verbosity: str | None,
+    stream: bool | None,
+    output_mode: str,
+) -> str:
+    """Shared implementation for ask_chatgpt_cli, ask_gemini_cli, and ask_claude_code."""
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    )
+    normalized_output_mode = _normalize_output_mode(output_mode)
+
+    primary_provider = default_primary
+
+    response = ""
+    for trial_model in _build_provider_model_trials(primary_provider, model):
+        provider_args = (
+            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
+            if trial_model is not None
+            else None
+        )
+        response = await _execute_failover_with_timeout(
+            primary_provider,
+            secondary,
+            prompt,
+            mode,
+            force_primary=force_model,
+            allow_tertiary=True,
+            timeout_seconds=options["timeout_seconds"],
+            provider_args=provider_args,
+            output_mode=normalized_output_mode,
+        )
+        if not _is_task_execution_failed(response):
+            break
+        if not _is_model_selection_failure(response):
+            break
+    response = _save_if_requested(response, save_path, tool_name=tool_name)
+    return _finalize_response(response, primary_provider, options)
+
+
 @mcp.tool()
 async def ask_chatgpt_cli(
     prompt: str,
@@ -959,39 +1011,23 @@ async def ask_chatgpt_cli(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    return await _ask_with_failover(
+        prompt,
+        default_primary="codex",
+        secondary="gemini",
+        mode="execution",
+        tool_name="ask_chatgpt_cli",
+        weighted_chain_name="ask_chatgpt_cli",
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
     )
-    normalized_output_mode = _normalize_output_mode(output_mode)
-
-    # Keep primary aligned with function identity: ask_chatgpt_cli => codex.
-    primary_provider = "codex"
-    secondary_provider = "gemini"
-
-    response = ""
-    for trial_model in _build_provider_model_trials(primary_provider, model):
-        provider_args = (
-            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            primary_provider,
-            secondary_provider,
-            prompt,
-            "execution",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
-    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -1024,39 +1060,23 @@ async def ask_gemini_cli(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    return await _ask_with_failover(
+        prompt,
+        default_primary="gemini",
+        secondary="codex",
+        mode="analysis",
+        tool_name="ask_gemini_cli",
+        weighted_chain_name="ask_gemini_cli",
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
     )
-    normalized_output_mode = _normalize_output_mode(output_mode)
-
-    # Keep primary aligned with function identity: ask_gemini_cli => gemini.
-    primary_provider = "gemini"
-    secondary_provider = "codex"
-
-    response = ""
-    for trial_model in _build_provider_model_trials(primary_provider, model):
-        provider_args = (
-            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            primary_provider,
-            secondary_provider,
-            prompt,
-            "analysis",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
-    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -1189,41 +1209,33 @@ async def ask_claude_code(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
-    )
-    normalized_output_mode = _normalize_output_mode(output_mode)
     if not _is_provider_configured("claude_code"):
+        options = _normalize_ask_options(
+            timeout_seconds, max_output_tokens, response_format, verbosity, stream
+        )
         return _finalize_response(
             "[PROVIDER ERROR] 'claude_code' is not configured in commands. "
             "Add commands.claude_code.exec/health in config to enable it.",
             "claude_code",
             options,
         )
-    response = ""
-    for trial_model in _build_provider_model_trials("claude_code", model):
-        provider_args = (
-            {"claude_code": _build_provider_model_args("claude_code", trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            "claude_code",
-            "codex",
-            prompt,
-            "analysis",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_claude_code")
-    return _finalize_response(response, "claude_code", options)
+    return await _ask_with_failover(
+        prompt,
+        default_primary="claude_code",
+        secondary="codex",
+        mode="analysis",
+        tool_name="ask_claude_code",
+        weighted_chain_name=None,
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
+    )
 
 
 @mcp.tool()
