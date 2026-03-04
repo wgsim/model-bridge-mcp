@@ -9,7 +9,7 @@ from typing import Any, Protocol
 
 
 class CacheBackend(Protocol):
-    """Protocol for cache backends.
+    """Protocol for synchronous cache backends.
 
     Any class implementing these methods can be used as a cache backend.
     """
@@ -44,6 +44,46 @@ class CacheBackend(Protocol):
         ...
 
     def clear(self) -> None:
+        """Clear all entries from the cache."""
+        ...
+
+
+class AsyncCacheBackend(Protocol):
+    """Protocol for asynchronous cache backends.
+
+    Any class implementing these async methods can be used as an async cache backend.
+    """
+
+    async def get(self, key: str) -> str | None:
+        """Get a value from the cache.
+
+        Args:
+            key: Cache key
+
+        Returns:
+            Cached value or None if not found/expired
+        """
+        ...
+
+    async def set(self, key: str, value: str, ttl_seconds: int | None = None) -> None:
+        """Set a value in the cache.
+
+        Args:
+            key: Cache key
+            value: Value to cache
+            ttl_seconds: Time-to-live in seconds (None = use default)
+        """
+        ...
+
+    async def delete(self, key: str) -> None:
+        """Delete a value from the cache.
+
+        Args:
+            key: Cache key
+        """
+        ...
+
+    async def clear(self) -> None:
         """Clear all entries from the cache."""
         ...
 
