@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("model_bridge.streaming")
 
+_STDERR_TRUNCATION = 200
+
 
 class StreamProgress:
     """Tracks streaming progress and sends notifications."""
@@ -196,7 +198,7 @@ async def run_with_streaming(
             logger.warning(
                 "Command failed with code %d: %s",
                 result.returncode,
-                stderr[:200],
+                stderr[:_STDERR_TRUNCATION],
             )
             # Include stderr in output for error context
             if stderr:

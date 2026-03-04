@@ -13,7 +13,10 @@ from typing import Any, List, Protocol, Sequence
 from model_bridge.adapters.base import CLIAdapter
 from model_bridge.core.error_category import ErrorInfo
 
-_ERROR_BUFFER: deque[dict] = deque(maxlen=50)
+_ERROR_BUFFER_MAX_SIZE = 50
+_ERROR_MESSAGE_TRUNCATION = 500
+
+_ERROR_BUFFER: deque[dict] = deque(maxlen=_ERROR_BUFFER_MAX_SIZE)
 
 
 def record_error(
@@ -28,7 +31,7 @@ def record_error(
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "provider": provider,
             "error_category": error_category,
-            "raw_message": raw_message[:500],
+            "raw_message": raw_message[:_ERROR_MESSAGE_TRUNCATION],
             "timeout_value": timeout_value,
         }
     )

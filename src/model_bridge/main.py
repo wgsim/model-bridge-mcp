@@ -39,6 +39,15 @@ logger = logging.getLogger("model_bridge.main")
 DEBUG_META_DIR = ".model_bridge/tmp"
 DEBUG_META_TTL_SECONDS = 48 * 60 * 60
 
+# --- Response formatting limits ---
+_BRIEF_TRUNCATION_LIMIT = 600
+_STREAM_CHUNK_SIZE = 200
+_SESSION_SUMMARY_TRUNCATION = 120
+
+# --- Subprocess timeouts (seconds) ---
+_NVIDIA_SMI_TIMEOUT_SECONDS = 2
+_HEALTH_CHECK_TIMEOUT_SECONDS = 5
+
 mcp = FastMCP("Model Bridge MCP")
 
 CONFIG: Optional[dict] = None
@@ -311,7 +320,7 @@ def _resolve_output_mode(output_mode: str | None) -> str:
 
 def _apply_verbosity(text: str, verbosity: str) -> str:
     if verbosity == "brief":
-        return text[:600].rstrip()
+        return text[:_BRIEF_TRUNCATION_LIMIT].rstrip()
     return text
 
 
@@ -325,7 +334,7 @@ def _apply_max_output_tokens(text: str, max_output_tokens: int) -> str:
 
 
 def _format_stream_fallback(text: str) -> str:
-    chunks = [text[i : i + 200] for i in range(0, len(text), 200)] or [""]
+    chunks = [text[i : i + _STREAM_CHUNK_SIZE] for i in range(0, len(text), _STREAM_CHUNK_SIZE)] or [""]
     return "[STREAM FALLBACK]\n" + "\n".join(chunks) + "\n[STREAM END]"
 
 
@@ -405,7 +414,7 @@ def _remember_session_turn(session_id: str | None, prompt: str, response: str) -
     memory = _get_session_memory()
     if memory is None:
         return
-    summary = f"Q: {prompt[:120]} | A: {response[:120]}"
+    summary = f"Q: {prompt[:_SESSION_SUMMARY_TRUNCATION]} | A: {response[:_SESSION_SUMMARY_TRUNCATION]}"
     memory.append_turn(session_id, summary)
 
 
@@ -560,7 +569,7 @@ def _detect_nvidia_vram_bytes() -> tuple[int | None, int | None]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=2,
+            timeout=_NVIDIA_SMI_TIMEOUT_SECONDS,
         )
     except Exception:
         return None, None
@@ -1753,7 +1762,7 @@ def health_check() -> str:
                 health_cmd,
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=_HEALTH_CHECK_TIMEOUT_SECONDS,
             )
             entry = {
                 "available": result.returncode == 0,
@@ -1767,7 +1776,7 @@ def health_check() -> str:
         except subprocess.TimeoutExpired:
             providers_status[provider] = {
                 "available": False,
-                "error": "health check timed out (5s)",
+                "error": f"health check timed out ({_HEALTH_CHECK_TIMEOUT_SECONDS}s)",
                 "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
         except Exception as e:
