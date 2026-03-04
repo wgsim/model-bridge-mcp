@@ -8,6 +8,19 @@ from collections import OrderedDict
 from typing import Any, Protocol
 
 
+def build_key(payload: dict[str, Any]) -> str:
+    """Build a cache key from a payload dict.
+
+    Args:
+        payload: Dictionary of values to hash
+
+    Returns:
+        SHA256 hash of the sorted payload
+    """
+    raw = repr(sorted(payload.items())).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 class CacheBackend(Protocol):
     """Protocol for cache backends.
 
@@ -75,8 +88,7 @@ class InMemoryCache:
         Returns:
             SHA256 hash of the sorted payload
         """
-        raw = repr(sorted(payload.items())).encode("utf-8")
-        return hashlib.sha256(raw).hexdigest()
+        return build_key(payload)
 
     def get(self, key: str) -> str | None:
         """Get a value from the cache."""

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from pathlib import Path
 from typing import Any
+
+from model_bridge.core.cache.backend import build_key as _build_key
 
 logger = logging.getLogger("model_bridge.cache.disk")
 
@@ -41,8 +42,7 @@ class DiskCache:
     @staticmethod
     def build_key(payload: dict[str, Any]) -> str:
         """Build a cache key from a payload dict."""
-        raw = repr(sorted(payload.items())).encode("utf-8")
-        return hashlib.sha256(raw).hexdigest()
+        return _build_key(payload)
 
     def _key_to_path(self, key: str) -> Path:
         """Convert a cache key to a file path."""
