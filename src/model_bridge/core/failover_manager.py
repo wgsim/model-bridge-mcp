@@ -59,39 +59,6 @@ class FailoverManager:
         self.config = config
         self.telemetry_logger = logging.getLogger("model_bridge.telemetry")
 
-    def _should_continue_failover(self, error_info: ErrorInfo) -> bool:
-        """Determine if failover should continue based on error category."""
-        if error_info.is_retryable:
-            return True
-        # Non-retryable errors should stop failover immediately
-        return False
-
-    def _format_error_with_info(
-        self,
-        routing_log: List[str],
-        msg: str,
-        error_info: ErrorInfo,
-        routing_tier: int,
-    ) -> str:
-        """Format error response with structured metadata."""
-        failure_meta = f"\n\n--- [Failure Metadata] ---\n"
-        failure_meta += f"error_category: {error_info.category.value}\n"
-        failure_meta += f"is_retryable: {error_info.is_retryable}\n"
-        failure_meta += f"suggested_action: {error_info.suggested_action}\n"
-
-        errors_by_tier = {}
-        if routing_tier >= 1:
-            errors_by_tier["primary"] = msg
-        if routing_tier >= 2:
-            errors_by_tier["secondary"] = msg
-        if routing_tier >= 3:
-            errors_by_tier["tertiary"] = msg
-
-        return (
-            f"[Task Execution Failed]\n{msg}{failure_meta}\n\n--- [Routing Log] ---\n"
-            + "\n".join(routing_log)
-        )
-
     def _format_response(self, content: str, routing: Sequence[str]) -> str:
         return f"{content}\n\n--- [Routing Log] ---\n" + "\n".join(routing)
 
