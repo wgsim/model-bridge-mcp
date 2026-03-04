@@ -13,7 +13,7 @@ def test_ask_ollama_resolves_alias_before_adapter_call(monkeypatch):
         return True, "ok"
 
     class _Adapter:
-        async def run_async(self, service_name, args, input_text):
+        async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
             return await _fake_run_async(service_name, args, input_text)
 
     monkeypatch.setattr(main_module, "_get_adapter", lambda: _Adapter())
@@ -42,7 +42,7 @@ def test_ask_ollama_uses_default_alias_when_model_not_provided(monkeypatch):
         return True, "ok"
 
     class _Adapter:
-        async def run_async(self, service_name, args, input_text):
+        async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
             return await _fake_run_async(service_name, args, input_text)
 
     monkeypatch.setattr(main_module, "_get_adapter", lambda: _Adapter())
@@ -74,7 +74,7 @@ def test_ask_ollama_tries_local_fallback_chain_before_cloud(monkeypatch):
         raise AssertionError("cloud fallback should not be used when local fallback succeeds")
 
     class _Adapter:
-        async def run_async(self, service_name, args, input_text):
+        async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
             return await _fake_run_async(service_name, args, input_text)
 
     class _Failover:

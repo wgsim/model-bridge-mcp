@@ -126,21 +126,13 @@ class FailoverManager:
         output_mode: str = "clean",
     ) -> tuple[bool, str]:
         strip_noise = output_mode != "raw"
-        try:
-            return await self.adapter.run_async(
-                service_name,
-                args,
-                input_text,
-                timeout_seconds=timeout_seconds,
-                strip_noise=strip_noise,
-            )
-        except TypeError:
-            try:
-                return await self.adapter.run_async(
-                    service_name, args, input_text, timeout_seconds=timeout_seconds
-                )
-            except TypeError:
-                return await self.adapter.run_async(service_name, args, input_text)
+        return await self.adapter.run_async(
+            service_name,
+            args,
+            input_text,
+            timeout_seconds=timeout_seconds,
+            strip_noise=strip_noise,
+        )
 
     def _emit_telemetry(
         self,
