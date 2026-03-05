@@ -32,6 +32,19 @@ from model_bridge.core.task_tracker import TaskTracker
 from model_bridge.core.prompt_cache import PromptCache
 from model_bridge.core.rate_limiter import TokenBucket
 from model_bridge.core.session_memory import SessionMemory
+from model_bridge.core.ollama_resolver import (
+    resolve_ollama_model as _resolve_ollama_model_impl,
+    normalize_model_name as _normalize_model_name,
+    resolve_fallback_chain as _resolve_fallback_chain_impl,
+    select_auto_ollama_alias as _select_auto_ollama_alias_impl,
+    parse_ollama_list_output as _parse_ollama_list_output,
+    get_installed_ollama_models as _get_installed_ollama_models,
+    compute_ollama_batch_concurrency as _compute_ollama_batch_concurrency_impl,
+    detect_ram_bytes as _detect_ram_bytes,
+    detect_nvidia_vram_bytes as _detect_nvidia_vram_bytes,
+    collect_runtime_resources as _collect_runtime_resources,
+    safe_gb as _safe_gb,
+)
 from model_bridge.security.sanitizer import SecuritySanitizer
 
 
@@ -371,14 +384,7 @@ def _finalize_response(response: str, provider: str, options: dict, cached: bool
 
 
 def _select_auto_ollama_alias(prompt: str) -> str:
-    runtime_cfg = _get_config().get("runtime", {})
-    short_threshold = runtime_cfg.get("auto_routing_short_prompt_threshold", 120)
-    low = prompt.lower()
-    if any(token in low for token in ("def ", "class ", "function", "python", "code", "bug", "stacktrace")):
-        return "coder"
-    if len(prompt.strip()) <= short_threshold:
-        return "fast"
-    return "default"
+    return _select_auto_ollama_alias_impl(prompt, config=_get_config())
 
 
 def _build_prompt_with_session(prompt: str, session_id: str | None) -> str:
@@ -528,142 +534,11 @@ def _save_if_requested(
 
 
 def _resolve_ollama_model(model_arg: str) -> tuple[str | None, str]:
-    models_cfg = _get_config()["models"]
-    aliases = models_cfg.get("ollama_aliases", {})
-    catalog = set(models_cfg.get("ollama_catalog", []))
-    token = (model_arg or "").strip()
-    if not token:
-        token = "default"
-
-    if token in aliases:
-        resolved = aliases[token]
-        return resolved, ""
-    if token in catalog:
-        return token, ""
-
-    alias_keys = ", ".join(sorted(aliases.keys()))
-    model_names = ", ".join(sorted(catalog))
-    return (
-        None,
-        (
-            f"[MODEL ERROR] Unknown ollama model/alias: '{token}'. "
-            f"Aliases: [{alias_keys}] | Models: [{model_names}]"
-        ),
-    )
-
-
-def _safe_gb(value_bytes: int | None) -> float | None:
-    if value_bytes is None:
-        return None
-    return round(value_bytes / (1024**3), 2)
-
-
-def _detect_ram_bytes() -> tuple[int | None, int | None]:
-    try:
-        page_size = int(os.sysconf("SC_PAGE_SIZE"))
-        total_pages = int(os.sysconf("SC_PHYS_PAGES"))
-        available_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
-        return page_size * total_pages, page_size * available_pages
-    except (ValueError, OSError, AttributeError):
-        return None, None
-
-
-def _detect_nvidia_vram_bytes() -> tuple[int | None, int | None]:
-    if not shutil.which("nvidia-smi"):
-        return None, None
-    try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.total,memory.free",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-    except Exception:
-        return None, None
-    if result.returncode != 0:
-        return None, None
-    total_mib = 0
-    free_mib = 0
-    for line in result.stdout.splitlines():
-        parts = [part.strip() for part in line.split(",")]
-        if len(parts) != 2:
-            continue
-        try:
-            total_mib += int(parts[0])
-            free_mib += int(parts[1])
-        except ValueError:
-            continue
-    if total_mib <= 0:
-        return None, None
-    mib = 1024 * 1024
-    return total_mib * mib, free_mib * mib
-
-
-def _collect_runtime_resources() -> dict:
-    ram_total_bytes, ram_free_bytes = _detect_ram_bytes()
-    vram_total_bytes, vram_free_bytes = _detect_nvidia_vram_bytes()
-    return {
-        "ram_total_gb": _safe_gb(ram_total_bytes),
-        "ram_free_gb": _safe_gb(ram_free_bytes),
-        "vram_total_gb": _safe_gb(vram_total_bytes),
-        "vram_free_gb": _safe_gb(vram_free_bytes),
-        "vram_detector": "nvidia-smi" if vram_total_bytes is not None else "unavailable",
-    }
+    return _resolve_ollama_model_impl(model_arg, config=_get_config())
 
 
 def _compute_ollama_batch_concurrency(model: str, requested_max_concurrency: int) -> dict:
-    runtime_cfg = _get_config().get("runtime", {})
-    default_max = int(runtime_cfg.get("ollama_resource_guard_default_max_concurrency", 1))
-    hard_cap = int(runtime_cfg.get("ollama_resource_guard_hard_cap", 2))
-    guard_enabled = bool(runtime_cfg.get("ollama_resource_guard_enabled", True))
-    requested = max(1, int(requested_max_concurrency))
-    resolved_model, _ = _resolve_ollama_model(model)
-    if resolved_model is None:
-        resolved_model = _get_config()["models"]["ollama_default_model"]
-
-    if not guard_enabled:
-        applied = max(1, min(requested, hard_cap))
-        return {
-            "resolved_model": resolved_model,
-            "applied_max_concurrency": applied,
-            "reason": "resource_guard_disabled",
-            "resources": _collect_runtime_resources(),
-        }
-
-    resources = _collect_runtime_resources()
-    model_mem_map = runtime_cfg.get("ollama_model_memory_gb", {})
-    model_mem_gb = model_mem_map.get(resolved_model)
-    ram_free_gb = resources.get("ram_free_gb")
-    reserve_ram_gb = float(runtime_cfg.get("ollama_resource_guard_reserve_ram_gb", 2.0))
-    safety_factor = float(runtime_cfg.get("ollama_resource_guard_safety_factor", 0.6))
-
-    allowed = default_max
-    reason = "default_conservative_guard"
-
-    if model_mem_gb and ram_free_gb is not None:
-        usable_gb = max(0.0, float(ram_free_gb) - reserve_ram_gb)
-        if model_mem_gb > 0:
-            estimated = int((usable_gb * safety_factor) // float(model_mem_gb))
-            allowed = max(default_max, estimated)
-            reason = "resource_based_estimation"
-    elif ram_free_gb is None:
-        reason = "ram_unavailable_default_guard"
-    else:
-        reason = "model_profile_missing_default_guard"
-
-    allowed = max(1, min(allowed, hard_cap))
-    applied = max(1, min(requested, allowed))
-    return {
-        "resolved_model": resolved_model,
-        "applied_max_concurrency": applied,
-        "reason": reason,
-        "resources": resources,
-    }
+    return _compute_ollama_batch_concurrency_impl(model, requested_max_concurrency, config=_get_config())
 
 
 def _mask_sensitive_text(text: str) -> str:
@@ -680,37 +555,8 @@ def _mask_sensitive_text(text: str) -> str:
     return masked
 
 
-def _normalize_model_name(name: str) -> str:
-    value = name.strip()
-    while value.endswith(":latest"):
-        value = value[: -len(":latest")]
-    return value
-
-
 def _resolve_fallback_chain(requested_model: str) -> list[str]:
-    models_cfg = _get_config()["models"]
-    aliases = models_cfg["ollama_aliases"]
-    catalog = set(models_cfg["ollama_catalog"])
-    chain_tokens = models_cfg.get("ollama_local_fallback_chain", [])
-
-    ordered: list[str] = []
-    seen: set[str] = set()
-
-    def _add_token(token: str) -> None:
-        if token in aliases:
-            model_name = aliases[token]
-        elif token in catalog:
-            model_name = token
-        else:
-            return
-        if model_name not in seen:
-            seen.add(model_name)
-            ordered.append(model_name)
-
-    _add_token(requested_model)
-    for token in chain_tokens:
-        _add_token(token)
-    return ordered
+    return _resolve_fallback_chain_impl(requested_model, config=_get_config())
 
 
 def _select_provider_by_weight(chain_name: str) -> str | None:
@@ -892,35 +738,6 @@ def _mark_cached_json_payload(payload_or_text: object) -> str | None:
     return None
 
 
-def _parse_ollama_list_output(output: str) -> list[str]:
-    names: list[str] = []
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.upper().startswith("NAME "):
-            continue
-        name = line.split()[0]
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def _get_installed_ollama_models() -> tuple[list[str], str]:
-    if not shutil.which("ollama"):
-        return [], "ollama command not found"
-    try:
-        proc = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception as exc:
-        return [], str(exc)
-    if proc.returncode != 0:
-        return [], (proc.stdout + proc.stderr).strip() or f"exit_code={proc.returncode}"
-    return _parse_ollama_list_output(proc.stdout), ""
 
 
 def _list_static_provider_models(provider_id: str) -> dict:
