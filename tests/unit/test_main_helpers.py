@@ -6,6 +6,7 @@ import time
 import pytest
 
 from model_bridge import main as main_module
+from model_bridge.adapters.sdk_adapter import SDKAdapter
 
 
 @pytest.fixture
@@ -97,6 +98,89 @@ def test_runtime_is_initialized_lazily_once(monkeypatch):
     assert isinstance(main_module._get_adapter(), _Adapter)
     assert isinstance(main_module._get_failover(), _Failover)
     assert calls["count"] == 1
+
+
+def test_build_runtime_uses_sdk_adapter_when_transport_mode_sdk():
+    config = {
+        "commands": {},
+        "security": {"block_patterns": ["rm"], "sensitive_paths": ["/etc/"]},
+        "runtime": {
+            "system_suffix": "",
+            "transport_mode": "sdk",
+            "apply_system_suffix": {
+                "codex": True,
+                "gemini": True,
+                "ollama": False,
+                "claude_code": True,
+            },
+            "subprocess_timeout_seconds": 120.0,
+        },
+        "models": {
+            "ollama_default_model": "gpt-oss:20b",
+            "ollama_aliases": {"default": "gpt-oss:20b"},
+            "ollama_catalog": ["gpt-oss:20b"],
+            "ollama_final_backup_model": "gpt-oss:20b",
+            "ollama_local_fallback_chain": ["default"],
+        },
+        "routing": {
+            "default_chains": {
+                "ask_chatgpt_cli": ["codex", "gemini", "ollama"],
+                "ask_gemini_cli": ["gemini", "codex", "ollama"],
+                "ask_ollama_cloud_fallback": ["codex", "gemini"],
+            }
+        },
+    }
+
+    _, adapter, _ = main_module.build_runtime(config=config)
+
+    assert isinstance(adapter, SDKAdapter)
+
+
+def test_build_runtime_forwards_extra_path_and_env_vars_to_factory(monkeypatch):
+    captured: dict = {}
+
+    class FakeAdapter:
+        pass
+
+    class FakeFailover:
+        def __init__(self, adapter, sanitizer, config):  # pylint: disable=unused-argument
+            self.adapter = adapter
+
+    def fake_build_adapter(config, *, env=None, extra_path=None, extra_env_vars=None):
+        captured["env"] = env
+        captured["extra_path"] = extra_path
+        captured["extra_env_vars"] = extra_env_vars
+        return FakeAdapter()
+
+    monkeypatch.setattr(main_module, "build_adapter", fake_build_adapter)
+    monkeypatch.setattr(main_module, "FailoverManager", FakeFailover)
+
+    config = {
+        "commands": {},
+        "security": {"block_patterns": ["rm"], "sensitive_paths": ["/etc/"]},
+        "runtime": {
+            "transport_mode": "subprocess",
+            "system_suffix": "",
+            "apply_system_suffix": {
+                "codex": True,
+                "gemini": True,
+                "ollama": False,
+                "claude_code": True,
+            },
+            "subprocess_timeout_seconds": 120.0,
+            "extra_path": ["/opt/custom/bin"],
+            "extra_env_vars": {"GOOGLE_CLOUD_PROJECT": "demo-project"},
+        },
+        "models": {},
+        "routing": {"default_chains": {}},
+    }
+
+    _, adapter, _ = main_module.build_runtime(config=config)
+
+    assert isinstance(adapter, FakeAdapter)
+    assert isinstance(captured["env"], dict)
+    assert captured["extra_path"] == ["/opt/custom/bin"]
+    assert captured["extra_env_vars"] == {"GOOGLE_CLOUD_PROJECT": "demo-project"}
 
 
 def test_ask_claude_code_returns_setup_error_when_unconfigured(monkeypatch):

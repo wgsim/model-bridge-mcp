@@ -17,7 +17,8 @@ from typing import Callable, Optional
 
 from mcp.server.fastmcp import FastMCP, Context
 
-from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
+from model_bridge.adapters.base import BaseAdapter
+from model_bridge.adapters.factory import build_adapter
 from model_bridge.config.config_loader import load_config
 from model_bridge.core.batch_executor import (
     BatchExecutor,
@@ -42,7 +43,7 @@ DEBUG_META_TTL_SECONDS = 48 * 60 * 60
 mcp = FastMCP("Model Bridge MCP")
 
 CONFIG: Optional[dict] = None
-ADAPTER: Optional[SubprocessAdapter] = None
+ADAPTER: Optional[BaseAdapter] = None
 FAILOVER: Optional[FailoverManager] = None
 PROMPT_CACHE: Optional[PromptCache] = None
 SESSION_MEMORY: Optional[SessionMemory] = None
@@ -60,7 +61,7 @@ def _get_model_bridge_version() -> str:
         return "unknown"
 
 
-def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
+def build_runtime(config: Optional[dict] = None) -> tuple[dict, BaseAdapter, FailoverManager]:
     """Build runtime dependencies for production and tests."""
     resolved_config = config if config is not None else load_config()
     SecuritySanitizer.configure(
@@ -68,16 +69,11 @@ def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapte
         sensitive_paths=resolved_config["security"]["sensitive_paths"],
     )
     runtime_config = resolved_config.get("runtime", {})
-    extra_path = runtime_config.get("extra_path")
-    extra_env_vars = runtime_config.get("extra_env_vars")
-    adapter = SubprocessAdapter(
-        cli_config=resolved_config["commands"],
+    adapter = build_adapter(
+        resolved_config,
         env=os.environ.copy(),
-        system_suffix=resolved_config["runtime"]["system_suffix"],
-        apply_system_suffix_for=resolved_config["runtime"]["apply_system_suffix"],
-        timeout_seconds=resolved_config["runtime"]["subprocess_timeout_seconds"],
-        extra_path=extra_path,
-        extra_env_vars=extra_env_vars,
+        extra_path=runtime_config.get("extra_path"),
+        extra_env_vars=runtime_config.get("extra_env_vars"),
     )
     failover = FailoverManager(adapter=adapter, sanitizer=SecuritySanitizer, config=resolved_config)
     return resolved_config, adapter, failover
@@ -96,7 +92,7 @@ def _get_config() -> dict:
     return CONFIG
 
 
-def _get_adapter() -> SubprocessAdapter:
+def _get_adapter() -> BaseAdapter:
     _ensure_runtime()
     assert ADAPTER is not None
     return ADAPTER
@@ -1698,6 +1694,26 @@ _PROVIDER_INSTALL_HINTS = {
 }
 
 
+def _health_entry_from_sdk_preflight(provider: str, adapter: BaseAdapter) -> dict:
+    """Build health payload entry for SDK transport preflight."""
+    entry: dict = {
+        "available": False,
+        "transport": "sdk",
+        "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    try:
+        ok, message = adapter.preflight_check(provider)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        entry["error"] = f"sdk preflight error: {exc}"
+        return entry
+    entry["available"] = ok
+    if ok and provider in {"codex", "gemini", "claude_code"}:
+        entry["auth"] = "configured"
+    if not ok:
+        entry["error"] = message
+    return entry
+
+
 @mcp.tool()
 def health_check() -> str:
     """Check health status of model-bridge and available providers.
@@ -1719,63 +1735,69 @@ def health_check() -> str:
         pass
 
     providers_status = {}
-    for provider in ["codex", "gemini", "ollama", "claude_code"]:
-        cmd_config = commands.get(provider, {})
-        health_cmd = cmd_config.get("health", [])
-        exec_cmd = cmd_config.get("exec", [])
+    transport_mode = str(runtime.get("transport_mode", "subprocess")).strip().lower()
+    if transport_mode == "sdk":
+        adapter = _get_adapter()
+        for provider in ["codex", "gemini", "ollama", "claude_code"]:
+            providers_status[provider] = _health_entry_from_sdk_preflight(provider, adapter)
+    else:
+        for provider in ["codex", "gemini", "ollama", "claude_code"]:
+            cmd_config = commands.get(provider, {})
+            health_cmd = cmd_config.get("health", [])
+            exec_cmd = cmd_config.get("exec", [])
 
-        if not health_cmd:
-            entry: dict = {
-                "available": False,
-                "error": "not configured",
-            }
-            hint = _PROVIDER_INSTALL_HINTS.get(provider)
-            if hint:
-                entry["install_hint"] = hint
-            providers_status[provider] = entry
-            continue
+            if not health_cmd:
+                entry: dict = {
+                    "available": False,
+                    "error": "not configured",
+                }
+                hint = _PROVIDER_INSTALL_HINTS.get(provider)
+                if hint:
+                    entry["install_hint"] = hint
+                providers_status[provider] = entry
+                continue
 
-        # Check if CLI binary is installed
-        bin_name = exec_cmd[0] if exec_cmd else health_cmd[0]
-        if not shutil.which(bin_name):
-            entry = {
-                "available": False,
-                "error": f"CLI '{bin_name}' not found in PATH",
-            }
-            hint = _PROVIDER_INSTALL_HINTS.get(provider)
-            if hint:
-                entry["install_hint"] = hint
-            providers_status[provider] = entry
-            continue
+            # Check if CLI binary is installed
+            bin_name = exec_cmd[0] if exec_cmd else health_cmd[0]
+            if not shutil.which(bin_name):
+                entry = {
+                    "available": False,
+                    "error": f"CLI '{bin_name}' not found in PATH",
+                }
+                hint = _PROVIDER_INSTALL_HINTS.get(provider)
+                if hint:
+                    entry["install_hint"] = hint
+                providers_status[provider] = entry
+                continue
 
-        try:
-            result = subprocess.run(
-                health_cmd,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            entry = {
-                "available": result.returncode == 0,
-                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-            if result.returncode == 0 and result.stdout.strip():
-                entry["version"] = result.stdout.strip().splitlines()[0][:120]
-            elif result.returncode != 0:
-                entry["error"] = f"health command exited with code {result.returncode}"
-            providers_status[provider] = entry
-        except subprocess.TimeoutExpired:
-            providers_status[provider] = {
-                "available": False,
-                "error": "health check timed out (5s)",
-                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-        except Exception as e:
-            providers_status[provider] = {
-                "available": False,
-                "error": str(e),
-                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
+            try:
+                result = subprocess.run(
+                    health_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                entry = {
+                    "available": result.returncode == 0,
+                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+                if result.returncode == 0 and result.stdout.strip():
+                    entry["version"] = result.stdout.strip().splitlines()[0][:120]
+                elif result.returncode != 0:
+                    entry["error"] = f"health command exited with code {result.returncode}"
+                providers_status[provider] = entry
+            except subprocess.TimeoutExpired:
+                providers_status[provider] = {
+                    "available": False,
+                    "error": "health check timed out (5s)",
+                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            except Exception as e:
+                providers_status[provider] = {
+                    "available": False,
+                    "error": str(e),
+                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
 
     # Ollama-specific: distinguish "not installed" vs "not running"
     ollama_entry = providers_status.get("ollama", {})
@@ -1792,6 +1814,7 @@ def health_check() -> str:
         "providers": providers_status,
         "ollama_running": ollama_running,
         "config_defaults": {
+            "transport_mode": runtime.get("transport_mode", "subprocess"),
             "subprocess_timeout_seconds": runtime.get("subprocess_timeout_seconds"),
             "ollama_timeout_seconds": runtime.get("ollama_timeout_seconds"),
             "system_suffix_enabled": bool(runtime.get("system_suffix")),
@@ -1805,36 +1828,60 @@ def health_check() -> str:
 def set_config(
     timeout_seconds: float | None = None,
     ollama_timeout_seconds: float | None = None,
+    transport_mode: str | None = None,
 ) -> str:
     """Update runtime configuration (timeout defaults) without restarting the server.
 
     Args:
         timeout_seconds: New default subprocess timeout in seconds (e.g. 180.0).
         ollama_timeout_seconds: New default Ollama-specific timeout in seconds.
+        transport_mode: New transport mode ('subprocess' or 'sdk').
 
     Returns:
         JSON with the new effective configuration values.
     """
-    global CONFIG, ADAPTER
+    global CONFIG, ADAPTER, FAILOVER
     config = _get_config()
     runtime = config.get("runtime", {})
     changes = {}
 
-    if timeout_seconds is not None:
-        runtime["subprocess_timeout_seconds"] = timeout_seconds
-        changes["subprocess_timeout_seconds"] = timeout_seconds
-        adapter = _get_adapter()
-        adapter.timeout_seconds = timeout_seconds
+    normalized_mode: str | None = None
+    if transport_mode is not None:
+        normalized_mode = transport_mode.strip().lower()
+        if normalized_mode not in {"subprocess", "sdk"}:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "transport_mode must be one of: subprocess, sdk",
+                },
+                ensure_ascii=False,
+            )
 
     if ollama_timeout_seconds is not None:
         runtime["ollama_timeout_seconds"] = ollama_timeout_seconds
         changes["ollama_timeout_seconds"] = ollama_timeout_seconds
+
+    if timeout_seconds is not None:
+        runtime["subprocess_timeout_seconds"] = timeout_seconds
+        changes["subprocess_timeout_seconds"] = timeout_seconds
+
+    if normalized_mode is not None:
+        runtime["transport_mode"] = normalized_mode
+        changes["transport_mode"] = normalized_mode
+        ADAPTER = build_adapter(config, env=os.environ.copy())
+        FAILOVER = FailoverManager(adapter=ADAPTER, sanitizer=SecuritySanitizer, config=config)
+
+    if timeout_seconds is not None:
+        adapter = ADAPTER if normalized_mode is not None else _get_adapter()
+        if hasattr(adapter, "timeout_seconds"):
+            adapter.timeout_seconds = timeout_seconds
 
     return json.dumps(
         {
             "status": "ok",
             "changes": changes,
             "effective": {
+                "transport_mode": runtime.get("transport_mode", "subprocess"),
                 "subprocess_timeout_seconds": runtime.get("subprocess_timeout_seconds"),
                 "ollama_timeout_seconds": runtime.get("ollama_timeout_seconds"),
             },
