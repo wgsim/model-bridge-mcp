@@ -103,12 +103,12 @@ def test_ask_ollama_returns_security_block_before_adapter_call(monkeypatch):
         async def run_async(self, *args, **kwargs):
             return await _raise_if_called(*args, **kwargs)
 
+    class _BlockingSanitizer:
+        def inspect(self, prompt, mode="execution"):
+            return False, "[SECURITY BLOCK] blocked"
+
     monkeypatch.setattr(main_module, "_get_adapter", lambda: _Adapter())
-    monkeypatch.setattr(
-        main_module.SecuritySanitizer,
-        "inspect",
-        classmethod(lambda cls, prompt, mode="execution": (False, "[SECURITY BLOCK] blocked")),
-    )
+    monkeypatch.setattr(main_module, "_get_sanitizer", lambda: _BlockingSanitizer())
 
     result = asyncio.run(main_module.ask_ollama("blocked prompt", model="default"))
     assert result == "[SECURITY BLOCK] blocked"

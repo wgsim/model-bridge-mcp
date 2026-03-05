@@ -260,3 +260,23 @@ class TestRedisCacheImport:
 
             with pytest.raises(RedisCacheError, match="requires the 'redis' package"):
                 RedisCache()
+
+
+def test_redis_sync_wrappers_backward_compatible(monkeypatch):
+    from model_bridge.core.cache.redis_cache import REDIS_AVAILABLE, RedisCache
+
+    if not REDIS_AVAILABLE:
+        pytest.skip("redis package not installed")
+
+    cache = RedisCache()
+
+    async def _fake_get(key):  # pylint: disable=unused-argument
+        return "value"
+
+    async def _fake_set(key, value, ttl_seconds=None):  # pylint: disable=unused-argument
+        return None
+
+    monkeypatch.setattr(cache, "get", _fake_get)
+    monkeypatch.setattr(cache, "set", _fake_set)
+    assert cache.get_sync("k") == "value"
+    cache.set_sync("k", "v")
