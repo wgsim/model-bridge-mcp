@@ -67,6 +67,14 @@ TASK_TRACKER: TaskTracker = TaskTracker()
 _PACKAGE_NAME = "model-bridge-mcp"
 
 
+def _supports_kwarg(func: Callable, name: str) -> bool:
+    """Return True if *func* accepts the keyword argument *name* (explicitly or via **kwargs)."""
+    params = inspect.signature(func).parameters
+    return name in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
 def _get_model_bridge_version() -> str:
     """Return installed package version for runtime health reporting."""
     try:
@@ -595,13 +603,8 @@ async def _run_ollama_with_timeout(
 ) -> tuple[bool, str]:
     adapter = _get_adapter()
     run_async = adapter.run_async
-    params = inspect.signature(run_async).parameters
-    supports_timeout = "timeout_seconds" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_strip_noise = "strip_noise" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
+    supports_timeout = _supports_kwarg(run_async, "timeout_seconds")
+    supports_strip_noise = _supports_kwarg(run_async, "strip_noise")
     kwargs: dict[str, object] = {}
     if supports_timeout:
         kwargs["timeout_seconds"] = timeout_seconds
@@ -637,16 +640,9 @@ async def _execute_failover_with_timeout(
 
     failover = _get_failover()
     execute_async = failover.execute_async
-    params = inspect.signature(execute_async).parameters
-    supports_timeout = "timeout_seconds" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_provider_args = "provider_args" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_output_mode = "output_mode" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
+    supports_timeout = _supports_kwarg(execute_async, "timeout_seconds")
+    supports_provider_args = _supports_kwarg(execute_async, "provider_args")
+    supports_output_mode = _supports_kwarg(execute_async, "output_mode")
     kwargs: dict[str, object] = {}
     if supports_timeout:
         kwargs["timeout_seconds"] = timeout_seconds
