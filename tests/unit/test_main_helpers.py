@@ -103,6 +103,33 @@ def test_runtime_is_initialized_lazily_once(monkeypatch):
     assert calls["count"] == 1
 
 
+def test_runtime_rebuilds_when_sanitizer_missing(monkeypatch):
+    calls = {"count": 0}
+    fake_config = {"models": {}}
+
+    class _Adapter:
+        pass
+
+    class _Failover:
+        pass
+
+    class _Sanitizer:
+        pass
+
+    def _fake_build_runtime(config=None):
+        calls["count"] += 1
+        return fake_config, _Adapter(), _Failover(), _Sanitizer()
+
+    monkeypatch.setattr(main_module, "build_runtime", _fake_build_runtime)
+    monkeypatch.setattr(main_module, "CONFIG", fake_config)
+    monkeypatch.setattr(main_module, "ADAPTER", _Adapter())
+    monkeypatch.setattr(main_module, "FAILOVER", _Failover())
+    monkeypatch.setattr(main_module, "SANITIZER", None)
+
+    assert isinstance(main_module._get_sanitizer(), _Sanitizer)
+    assert calls["count"] == 1
+
+
 def test_ask_claude_code_returns_setup_error_when_unconfigured(monkeypatch):
     monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: False)
 

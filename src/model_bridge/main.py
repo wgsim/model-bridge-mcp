@@ -86,7 +86,12 @@ def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapte
 
 def _ensure_runtime() -> None:
     global CONFIG, ADAPTER, FAILOVER, SANITIZER
-    if CONFIG is not None and ADAPTER is not None and FAILOVER is not None:
+    if (
+        CONFIG is not None
+        and ADAPTER is not None
+        and FAILOVER is not None
+        and SANITIZER is not None
+    ):
         return
     CONFIG, ADAPTER, FAILOVER, SANITIZER = build_runtime()
 
