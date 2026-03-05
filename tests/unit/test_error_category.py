@@ -8,7 +8,6 @@ from hypothesis import given, strategies as st
 from model_bridge.core.error_category import (
     ErrorCategory,
     ErrorInfo,
-    is_retryable,
 )
 
 
@@ -17,27 +16,30 @@ class TestErrorCategory:
 
     def test_retryable_categories(self):
         """Test that retryable error categories are correctly identified."""
-        retryable = {
-            ErrorCategory.RATE_LIMITED,
-            ErrorCategory.TIMEOUT,
-            ErrorCategory.PROVIDER_UNAVAILABLE,
-        }
-        for category in retryable:
-            assert is_retryable(category) is True
+        retryable_messages = [
+            ("rate limit exceeded", ErrorCategory.RATE_LIMITED),
+            ("request timeout", ErrorCategory.TIMEOUT),
+            ("service unavailable", ErrorCategory.PROVIDER_UNAVAILABLE),
+        ]
+        for message, expected_category in retryable_messages:
+            error = ErrorInfo.from_message(message, "test_provider")
+            assert error.category == expected_category
+            assert error.is_retryable is True
 
     def test_non_retryable_categories(self):
         """Test that non-retryable error categories are correctly identified."""
-        non_retryable = {
-            ErrorCategory.AUTH_FAILED,
-            ErrorCategory.INVALID_REQUEST,
-            ErrorCategory.SECURITY_BLOCKED,
-            ErrorCategory.EXECUTION_ERROR,
-            ErrorCategory.MODEL_NOT_FOUND,
-            ErrorCategory.CONFIGURATION_ERROR,
-            ErrorCategory.TOKEN_LIMIT_EXCEEDED,
-        }
-        for category in non_retryable:
-            assert is_retryable(category) is False
+        non_retryable_messages = [
+            ("invalid api key", ErrorCategory.AUTH_FAILED),
+            ("invalid request", ErrorCategory.INVALID_REQUEST),
+            ("[SECURITY BLOCK] blocked", ErrorCategory.SECURITY_BLOCKED),
+            ("some unknown error xyz", ErrorCategory.EXECUTION_ERROR),
+            ("model gpt-5 not found", ErrorCategory.MODEL_NOT_FOUND),
+            ("max tokens exceeded", ErrorCategory.TOKEN_LIMIT_EXCEEDED),
+        ]
+        for message, expected_category in non_retryable_messages:
+            error = ErrorInfo.from_message(message, "test_provider")
+            assert error.category == expected_category
+            assert error.is_retryable is False
 
 
 class TestErrorInfo:

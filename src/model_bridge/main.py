@@ -17,7 +17,8 @@ from typing import Callable, Optional
 
 from mcp.server.fastmcp import FastMCP, Context
 
-from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
+from model_bridge.adapters.base import BaseAdapter
+from model_bridge.adapters.factory import build_adapter
 from model_bridge.config.config_loader import load_config
 from model_bridge.core.batch_executor import (
     BatchExecutor,
@@ -31,6 +32,19 @@ from model_bridge.core.task_tracker import TaskTracker
 from model_bridge.core.prompt_cache import PromptCache
 from model_bridge.core.rate_limiter import TokenBucket
 from model_bridge.core.session_memory import SessionMemory
+from model_bridge.core.ollama_resolver import (
+    resolve_ollama_model as _resolve_ollama_model_impl,
+    normalize_model_name as _normalize_model_name,
+    resolve_fallback_chain as _resolve_fallback_chain_impl,
+    select_auto_ollama_alias as _select_auto_ollama_alias_impl,
+    parse_ollama_list_output as _parse_ollama_list_output,
+    get_installed_ollama_models as _get_installed_ollama_models,
+    compute_ollama_batch_concurrency as _compute_ollama_batch_concurrency_impl,
+    detect_ram_bytes as _detect_ram_bytes,
+    detect_nvidia_vram_bytes as _detect_nvidia_vram_bytes,
+    collect_runtime_resources as _collect_runtime_resources,
+    safe_gb as _safe_gb,
+)
 from model_bridge.security.sanitizer import SecuritySanitizer
 
 
@@ -42,14 +56,23 @@ DEBUG_META_TTL_SECONDS = 48 * 60 * 60
 mcp = FastMCP("Model Bridge MCP")
 
 CONFIG: Optional[dict] = None
-ADAPTER: Optional[SubprocessAdapter] = None
+ADAPTER: Optional[BaseAdapter] = None
 FAILOVER: Optional[FailoverManager] = None
+SANITIZER: Optional[SecuritySanitizer] = None
 PROMPT_CACHE: Optional[PromptCache] = None
 SESSION_MEMORY: Optional[SessionMemory] = None
 PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
 PLUGIN_LOADER: Optional[PluginLoader] = None
 TASK_TRACKER: TaskTracker = TaskTracker()
 _PACKAGE_NAME = "model-bridge-mcp"
+
+
+def _supports_kwarg(func: Callable, name: str) -> bool:
+    """Return True if *func* accepts the keyword argument *name* (explicitly or via **kwargs)."""
+    params = inspect.signature(func).parameters
+    return name in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
 
 
 def _get_model_bridge_version() -> str:
@@ -60,34 +83,39 @@ def _get_model_bridge_version() -> str:
         return "unknown"
 
 
-def build_runtime(config: Optional[dict] = None) -> tuple[dict, SubprocessAdapter, FailoverManager]:
+def build_runtime(config: Optional[dict] = None) -> tuple[
+    dict,
+    BaseAdapter,
+    FailoverManager,
+    SecuritySanitizer,
+]:
     """Build runtime dependencies for production and tests."""
     resolved_config = config if config is not None else load_config()
-    SecuritySanitizer.configure(
+    sanitizer = SecuritySanitizer(
         block_patterns=resolved_config["security"]["block_patterns"],
         sensitive_paths=resolved_config["security"]["sensitive_paths"],
     )
     runtime_config = resolved_config.get("runtime", {})
-    extra_path = runtime_config.get("extra_path")
-    extra_env_vars = runtime_config.get("extra_env_vars")
-    adapter = SubprocessAdapter(
-        cli_config=resolved_config["commands"],
+    adapter = build_adapter(
+        resolved_config,
         env=os.environ.copy(),
-        system_suffix=resolved_config["runtime"]["system_suffix"],
-        apply_system_suffix_for=resolved_config["runtime"]["apply_system_suffix"],
-        timeout_seconds=resolved_config["runtime"]["subprocess_timeout_seconds"],
-        extra_path=extra_path,
-        extra_env_vars=extra_env_vars,
+        extra_path=runtime_config.get("extra_path"),
+        extra_env_vars=runtime_config.get("extra_env_vars"),
     )
-    failover = FailoverManager(adapter=adapter, sanitizer=SecuritySanitizer, config=resolved_config)
-    return resolved_config, adapter, failover
+    failover = FailoverManager(adapter=adapter, sanitizer=sanitizer, config=resolved_config)
+    return resolved_config, adapter, failover, sanitizer
 
 
 def _ensure_runtime() -> None:
-    global CONFIG, ADAPTER, FAILOVER
-    if CONFIG is not None and ADAPTER is not None and FAILOVER is not None:
+    global CONFIG, ADAPTER, FAILOVER, SANITIZER
+    if (
+        CONFIG is not None
+        and ADAPTER is not None
+        and FAILOVER is not None
+        and SANITIZER is not None
+    ):
         return
-    CONFIG, ADAPTER, FAILOVER = build_runtime()
+    CONFIG, ADAPTER, FAILOVER, SANITIZER = build_runtime()
 
 
 def _get_config() -> dict:
@@ -96,7 +124,7 @@ def _get_config() -> dict:
     return CONFIG
 
 
-def _get_adapter() -> SubprocessAdapter:
+def _get_adapter() -> BaseAdapter:
     _ensure_runtime()
     assert ADAPTER is not None
     return ADAPTER
@@ -106,6 +134,12 @@ def _get_failover() -> FailoverManager:
     _ensure_runtime()
     assert FAILOVER is not None
     return FAILOVER
+
+
+def _get_sanitizer() -> SecuritySanitizer:
+    _ensure_runtime()
+    assert SANITIZER is not None
+    return SANITIZER
 
 
 def _get_runtime_defaults() -> dict:
@@ -350,14 +384,7 @@ def _finalize_response(response: str, provider: str, options: dict, cached: bool
 
 
 def _select_auto_ollama_alias(prompt: str) -> str:
-    runtime_cfg = _get_config().get("runtime", {})
-    short_threshold = runtime_cfg.get("auto_routing_short_prompt_threshold", 120)
-    low = prompt.lower()
-    if any(token in low for token in ("def ", "class ", "function", "python", "code", "bug", "stacktrace")):
-        return "coder"
-    if len(prompt.strip()) <= short_threshold:
-        return "fast"
-    return "default"
+    return _select_auto_ollama_alias_impl(prompt, config=_get_config())
 
 
 def _build_prompt_with_session(prompt: str, session_id: str | None) -> str:
@@ -507,142 +534,11 @@ def _save_if_requested(
 
 
 def _resolve_ollama_model(model_arg: str) -> tuple[str | None, str]:
-    models_cfg = _get_config()["models"]
-    aliases = models_cfg.get("ollama_aliases", {})
-    catalog = set(models_cfg.get("ollama_catalog", []))
-    token = (model_arg or "").strip()
-    if not token:
-        token = "default"
-
-    if token in aliases:
-        resolved = aliases[token]
-        return resolved, ""
-    if token in catalog:
-        return token, ""
-
-    alias_keys = ", ".join(sorted(aliases.keys()))
-    model_names = ", ".join(sorted(catalog))
-    return (
-        None,
-        (
-            f"[MODEL ERROR] Unknown ollama model/alias: '{token}'. "
-            f"Aliases: [{alias_keys}] | Models: [{model_names}]"
-        ),
-    )
-
-
-def _safe_gb(value_bytes: int | None) -> float | None:
-    if value_bytes is None:
-        return None
-    return round(value_bytes / (1024**3), 2)
-
-
-def _detect_ram_bytes() -> tuple[int | None, int | None]:
-    try:
-        page_size = int(os.sysconf("SC_PAGE_SIZE"))
-        total_pages = int(os.sysconf("SC_PHYS_PAGES"))
-        available_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
-        return page_size * total_pages, page_size * available_pages
-    except (ValueError, OSError, AttributeError):
-        return None, None
-
-
-def _detect_nvidia_vram_bytes() -> tuple[int | None, int | None]:
-    if not shutil.which("nvidia-smi"):
-        return None, None
-    try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.total,memory.free",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-    except Exception:
-        return None, None
-    if result.returncode != 0:
-        return None, None
-    total_mib = 0
-    free_mib = 0
-    for line in result.stdout.splitlines():
-        parts = [part.strip() for part in line.split(",")]
-        if len(parts) != 2:
-            continue
-        try:
-            total_mib += int(parts[0])
-            free_mib += int(parts[1])
-        except ValueError:
-            continue
-    if total_mib <= 0:
-        return None, None
-    mib = 1024 * 1024
-    return total_mib * mib, free_mib * mib
-
-
-def _collect_runtime_resources() -> dict:
-    ram_total_bytes, ram_free_bytes = _detect_ram_bytes()
-    vram_total_bytes, vram_free_bytes = _detect_nvidia_vram_bytes()
-    return {
-        "ram_total_gb": _safe_gb(ram_total_bytes),
-        "ram_free_gb": _safe_gb(ram_free_bytes),
-        "vram_total_gb": _safe_gb(vram_total_bytes),
-        "vram_free_gb": _safe_gb(vram_free_bytes),
-        "vram_detector": "nvidia-smi" if vram_total_bytes is not None else "unavailable",
-    }
+    return _resolve_ollama_model_impl(model_arg, config=_get_config())
 
 
 def _compute_ollama_batch_concurrency(model: str, requested_max_concurrency: int) -> dict:
-    runtime_cfg = _get_config().get("runtime", {})
-    default_max = int(runtime_cfg.get("ollama_resource_guard_default_max_concurrency", 1))
-    hard_cap = int(runtime_cfg.get("ollama_resource_guard_hard_cap", 2))
-    guard_enabled = bool(runtime_cfg.get("ollama_resource_guard_enabled", True))
-    requested = max(1, int(requested_max_concurrency))
-    resolved_model, _ = _resolve_ollama_model(model)
-    if resolved_model is None:
-        resolved_model = _get_config()["models"]["ollama_default_model"]
-
-    if not guard_enabled:
-        applied = max(1, min(requested, hard_cap))
-        return {
-            "resolved_model": resolved_model,
-            "applied_max_concurrency": applied,
-            "reason": "resource_guard_disabled",
-            "resources": _collect_runtime_resources(),
-        }
-
-    resources = _collect_runtime_resources()
-    model_mem_map = runtime_cfg.get("ollama_model_memory_gb", {})
-    model_mem_gb = model_mem_map.get(resolved_model)
-    ram_free_gb = resources.get("ram_free_gb")
-    reserve_ram_gb = float(runtime_cfg.get("ollama_resource_guard_reserve_ram_gb", 2.0))
-    safety_factor = float(runtime_cfg.get("ollama_resource_guard_safety_factor", 0.6))
-
-    allowed = default_max
-    reason = "default_conservative_guard"
-
-    if model_mem_gb and ram_free_gb is not None:
-        usable_gb = max(0.0, float(ram_free_gb) - reserve_ram_gb)
-        if model_mem_gb > 0:
-            estimated = int((usable_gb * safety_factor) // float(model_mem_gb))
-            allowed = max(default_max, estimated)
-            reason = "resource_based_estimation"
-    elif ram_free_gb is None:
-        reason = "ram_unavailable_default_guard"
-    else:
-        reason = "model_profile_missing_default_guard"
-
-    allowed = max(1, min(allowed, hard_cap))
-    applied = max(1, min(requested, allowed))
-    return {
-        "resolved_model": resolved_model,
-        "applied_max_concurrency": applied,
-        "reason": reason,
-        "resources": resources,
-    }
+    return _compute_ollama_batch_concurrency_impl(model, requested_max_concurrency, config=_get_config())
 
 
 def _mask_sensitive_text(text: str) -> str:
@@ -659,37 +555,8 @@ def _mask_sensitive_text(text: str) -> str:
     return masked
 
 
-def _normalize_model_name(name: str) -> str:
-    value = name.strip()
-    while value.endswith(":latest"):
-        value = value[: -len(":latest")]
-    return value
-
-
 def _resolve_fallback_chain(requested_model: str) -> list[str]:
-    models_cfg = _get_config()["models"]
-    aliases = models_cfg["ollama_aliases"]
-    catalog = set(models_cfg["ollama_catalog"])
-    chain_tokens = models_cfg.get("ollama_local_fallback_chain", [])
-
-    ordered: list[str] = []
-    seen: set[str] = set()
-
-    def _add_token(token: str) -> None:
-        if token in aliases:
-            model_name = aliases[token]
-        elif token in catalog:
-            model_name = token
-        else:
-            return
-        if model_name not in seen:
-            seen.add(model_name)
-            ordered.append(model_name)
-
-    _add_token(requested_model)
-    for token in chain_tokens:
-        _add_token(token)
-    return ordered
+    return _resolve_fallback_chain_impl(requested_model, config=_get_config())
 
 
 def _select_provider_by_weight(chain_name: str) -> str | None:
@@ -736,13 +603,8 @@ async def _run_ollama_with_timeout(
 ) -> tuple[bool, str]:
     adapter = _get_adapter()
     run_async = adapter.run_async
-    params = inspect.signature(run_async).parameters
-    supports_timeout = "timeout_seconds" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_strip_noise = "strip_noise" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
+    supports_timeout = _supports_kwarg(run_async, "timeout_seconds")
+    supports_strip_noise = _supports_kwarg(run_async, "strip_noise")
     kwargs: dict[str, object] = {}
     if supports_timeout:
         kwargs["timeout_seconds"] = timeout_seconds
@@ -778,16 +640,9 @@ async def _execute_failover_with_timeout(
 
     failover = _get_failover()
     execute_async = failover.execute_async
-    params = inspect.signature(execute_async).parameters
-    supports_timeout = "timeout_seconds" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_provider_args = "provider_args" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_output_mode = "output_mode" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
+    supports_timeout = _supports_kwarg(execute_async, "timeout_seconds")
+    supports_provider_args = _supports_kwarg(execute_async, "provider_args")
+    supports_output_mode = _supports_kwarg(execute_async, "output_mode")
     kwargs: dict[str, object] = {}
     if supports_timeout:
         kwargs["timeout_seconds"] = timeout_seconds
@@ -883,35 +738,6 @@ def _mark_cached_json_payload(payload_or_text: object) -> str | None:
     return None
 
 
-def _parse_ollama_list_output(output: str) -> list[str]:
-    names: list[str] = []
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.upper().startswith("NAME "):
-            continue
-        name = line.split()[0]
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def _get_installed_ollama_models() -> tuple[list[str], str]:
-    if not shutil.which("ollama"):
-        return [], "ollama command not found"
-    try:
-        proc = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception as exc:
-        return [], str(exc)
-    if proc.returncode != 0:
-        return [], (proc.stdout + proc.stderr).strip() or f"exit_code={proc.returncode}"
-    return _parse_ollama_list_output(proc.stdout), ""
 
 
 def _list_static_provider_models(provider_id: str) -> dict:
@@ -927,6 +753,58 @@ def _list_static_provider_models(provider_id: str) -> dict:
         "catalog_count": len(catalog),
         "command": commands_cfg.get(provider_id, {}).get("exec", []),
     }
+
+
+async def _ask_with_failover(
+    prompt: str,
+    *,
+    default_primary: str,
+    secondary: str,
+    mode: str,
+    tool_name: str,
+    weighted_chain_name: str | None,
+    save_path: str | None,
+    force_model: bool,
+    model: str | None,
+    timeout_seconds: float | None,
+    max_output_tokens: int | None,
+    response_format: str | None,
+    verbosity: str | None,
+    stream: bool | None,
+    output_mode: str,
+) -> str:
+    """Shared implementation for ask_chatgpt_cli, ask_gemini_cli, and ask_claude_code."""
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    )
+    normalized_output_mode = _normalize_output_mode(output_mode)
+
+    primary_provider = default_primary
+
+    response = ""
+    for trial_model in _build_provider_model_trials(primary_provider, model):
+        provider_args = (
+            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
+            if trial_model is not None
+            else None
+        )
+        response = await _execute_failover_with_timeout(
+            primary_provider,
+            secondary,
+            prompt,
+            mode,
+            force_primary=force_model,
+            allow_tertiary=True,
+            timeout_seconds=options["timeout_seconds"],
+            provider_args=provider_args,
+            output_mode=normalized_output_mode,
+        )
+        if not _is_task_execution_failed(response):
+            break
+        if not _is_model_selection_failure(response):
+            break
+    response = _save_if_requested(response, save_path, tool_name=tool_name)
+    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -959,39 +837,23 @@ async def ask_chatgpt_cli(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    return await _ask_with_failover(
+        prompt,
+        default_primary="codex",
+        secondary="gemini",
+        mode="execution",
+        tool_name="ask_chatgpt_cli",
+        weighted_chain_name="ask_chatgpt_cli",
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
     )
-    normalized_output_mode = _normalize_output_mode(output_mode)
-
-    # Keep primary aligned with function identity: ask_chatgpt_cli => codex.
-    primary_provider = "codex"
-    secondary_provider = "gemini"
-
-    response = ""
-    for trial_model in _build_provider_model_trials(primary_provider, model):
-        provider_args = (
-            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            primary_provider,
-            secondary_provider,
-            prompt,
-            "execution",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
-    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -1024,39 +886,23 @@ async def ask_gemini_cli(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    return await _ask_with_failover(
+        prompt,
+        default_primary="gemini",
+        secondary="codex",
+        mode="analysis",
+        tool_name="ask_gemini_cli",
+        weighted_chain_name="ask_gemini_cli",
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
     )
-    normalized_output_mode = _normalize_output_mode(output_mode)
-
-    # Keep primary aligned with function identity: ask_gemini_cli => gemini.
-    primary_provider = "gemini"
-    secondary_provider = "codex"
-
-    response = ""
-    for trial_model in _build_provider_model_trials(primary_provider, model):
-        provider_args = (
-            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            primary_provider,
-            secondary_provider,
-            prompt,
-            "analysis",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
-    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -1095,7 +941,7 @@ async def ask_ollama(
         effective_timeout, max_output_tokens, response_format, verbosity, stream
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
-    is_safe, sec_msg = SecuritySanitizer.inspect(prompt, mode="execution")
+    is_safe, sec_msg = _get_sanitizer().inspect(prompt, mode="execution")
     if not is_safe:
         return _finalize_response(sec_msg, "ollama", options)
 
@@ -1189,41 +1035,33 @@ async def ask_claude_code(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
-    )
-    normalized_output_mode = _normalize_output_mode(output_mode)
     if not _is_provider_configured("claude_code"):
+        options = _normalize_ask_options(
+            timeout_seconds, max_output_tokens, response_format, verbosity, stream
+        )
         return _finalize_response(
             "[PROVIDER ERROR] 'claude_code' is not configured in commands. "
             "Add commands.claude_code.exec/health in config to enable it.",
             "claude_code",
             options,
         )
-    response = ""
-    for trial_model in _build_provider_model_trials("claude_code", model):
-        provider_args = (
-            {"claude_code": _build_provider_model_args("claude_code", trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            "claude_code",
-            "codex",
-            prompt,
-            "analysis",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_claude_code")
-    return _finalize_response(response, "claude_code", options)
+    return await _ask_with_failover(
+        prompt,
+        default_primary="claude_code",
+        secondary="codex",
+        mode="analysis",
+        tool_name="ask_claude_code",
+        weighted_chain_name=None,
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
+    )
 
 
 @mcp.tool()
@@ -1698,6 +1536,26 @@ _PROVIDER_INSTALL_HINTS = {
 }
 
 
+def _health_entry_from_sdk_preflight(provider: str, adapter: BaseAdapter) -> dict:
+    """Build health payload entry for SDK transport preflight."""
+    entry: dict = {
+        "available": False,
+        "transport": "sdk",
+        "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    try:
+        ok, message = adapter.preflight_check(provider)
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        entry["error"] = f"sdk preflight error: {exc}"
+        return entry
+    entry["available"] = ok
+    if ok and provider in {"codex", "gemini", "claude_code"}:
+        entry["auth"] = "configured"
+    if not ok:
+        entry["error"] = message
+    return entry
+
+
 @mcp.tool()
 def health_check() -> str:
     """Check health status of model-bridge and available providers.
@@ -1719,63 +1577,69 @@ def health_check() -> str:
         pass
 
     providers_status = {}
-    for provider in ["codex", "gemini", "ollama", "claude_code"]:
-        cmd_config = commands.get(provider, {})
-        health_cmd = cmd_config.get("health", [])
-        exec_cmd = cmd_config.get("exec", [])
+    transport_mode = str(runtime.get("transport_mode", "subprocess")).strip().lower()
+    if transport_mode == "sdk":
+        adapter = _get_adapter()
+        for provider in ["codex", "gemini", "ollama", "claude_code"]:
+            providers_status[provider] = _health_entry_from_sdk_preflight(provider, adapter)
+    else:
+        for provider in ["codex", "gemini", "ollama", "claude_code"]:
+            cmd_config = commands.get(provider, {})
+            health_cmd = cmd_config.get("health", [])
+            exec_cmd = cmd_config.get("exec", [])
 
-        if not health_cmd:
-            entry: dict = {
-                "available": False,
-                "error": "not configured",
-            }
-            hint = _PROVIDER_INSTALL_HINTS.get(provider)
-            if hint:
-                entry["install_hint"] = hint
-            providers_status[provider] = entry
-            continue
+            if not health_cmd:
+                entry: dict = {
+                    "available": False,
+                    "error": "not configured",
+                }
+                hint = _PROVIDER_INSTALL_HINTS.get(provider)
+                if hint:
+                    entry["install_hint"] = hint
+                providers_status[provider] = entry
+                continue
 
-        # Check if CLI binary is installed
-        bin_name = exec_cmd[0] if exec_cmd else health_cmd[0]
-        if not shutil.which(bin_name):
-            entry = {
-                "available": False,
-                "error": f"CLI '{bin_name}' not found in PATH",
-            }
-            hint = _PROVIDER_INSTALL_HINTS.get(provider)
-            if hint:
-                entry["install_hint"] = hint
-            providers_status[provider] = entry
-            continue
+            # Check if CLI binary is installed
+            bin_name = exec_cmd[0] if exec_cmd else health_cmd[0]
+            if not shutil.which(bin_name):
+                entry = {
+                    "available": False,
+                    "error": f"CLI '{bin_name}' not found in PATH",
+                }
+                hint = _PROVIDER_INSTALL_HINTS.get(provider)
+                if hint:
+                    entry["install_hint"] = hint
+                providers_status[provider] = entry
+                continue
 
-        try:
-            result = subprocess.run(
-                health_cmd,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            entry = {
-                "available": result.returncode == 0,
-                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-            if result.returncode == 0 and result.stdout.strip():
-                entry["version"] = result.stdout.strip().splitlines()[0][:120]
-            elif result.returncode != 0:
-                entry["error"] = f"health command exited with code {result.returncode}"
-            providers_status[provider] = entry
-        except subprocess.TimeoutExpired:
-            providers_status[provider] = {
-                "available": False,
-                "error": "health check timed out (5s)",
-                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-        except Exception as e:
-            providers_status[provider] = {
-                "available": False,
-                "error": str(e),
-                "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
+            try:
+                result = subprocess.run(
+                    health_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                entry = {
+                    "available": result.returncode == 0,
+                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+                if result.returncode == 0 and result.stdout.strip():
+                    entry["version"] = result.stdout.strip().splitlines()[0][:120]
+                elif result.returncode != 0:
+                    entry["error"] = f"health command exited with code {result.returncode}"
+                providers_status[provider] = entry
+            except subprocess.TimeoutExpired:
+                providers_status[provider] = {
+                    "available": False,
+                    "error": "health check timed out (5s)",
+                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            except Exception as e:
+                providers_status[provider] = {
+                    "available": False,
+                    "error": str(e),
+                    "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
 
     # Ollama-specific: distinguish "not installed" vs "not running"
     ollama_entry = providers_status.get("ollama", {})
@@ -1792,6 +1656,7 @@ def health_check() -> str:
         "providers": providers_status,
         "ollama_running": ollama_running,
         "config_defaults": {
+            "transport_mode": runtime.get("transport_mode", "subprocess"),
             "subprocess_timeout_seconds": runtime.get("subprocess_timeout_seconds"),
             "ollama_timeout_seconds": runtime.get("ollama_timeout_seconds"),
             "system_suffix_enabled": bool(runtime.get("system_suffix")),
@@ -1805,36 +1670,60 @@ def health_check() -> str:
 def set_config(
     timeout_seconds: float | None = None,
     ollama_timeout_seconds: float | None = None,
+    transport_mode: str | None = None,
 ) -> str:
     """Update runtime configuration (timeout defaults) without restarting the server.
 
     Args:
         timeout_seconds: New default subprocess timeout in seconds (e.g. 180.0).
         ollama_timeout_seconds: New default Ollama-specific timeout in seconds.
+        transport_mode: New transport mode ('subprocess' or 'sdk').
 
     Returns:
         JSON with the new effective configuration values.
     """
-    global CONFIG, ADAPTER
+    global CONFIG, ADAPTER, FAILOVER
     config = _get_config()
     runtime = config.get("runtime", {})
     changes = {}
 
-    if timeout_seconds is not None:
-        runtime["subprocess_timeout_seconds"] = timeout_seconds
-        changes["subprocess_timeout_seconds"] = timeout_seconds
-        adapter = _get_adapter()
-        adapter.timeout_seconds = timeout_seconds
+    normalized_mode: str | None = None
+    if transport_mode is not None:
+        normalized_mode = transport_mode.strip().lower()
+        if normalized_mode not in {"subprocess", "sdk"}:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "transport_mode must be one of: subprocess, sdk",
+                },
+                ensure_ascii=False,
+            )
 
     if ollama_timeout_seconds is not None:
         runtime["ollama_timeout_seconds"] = ollama_timeout_seconds
         changes["ollama_timeout_seconds"] = ollama_timeout_seconds
+
+    if timeout_seconds is not None:
+        runtime["subprocess_timeout_seconds"] = timeout_seconds
+        changes["subprocess_timeout_seconds"] = timeout_seconds
+
+    if normalized_mode is not None:
+        runtime["transport_mode"] = normalized_mode
+        changes["transport_mode"] = normalized_mode
+        ADAPTER = build_adapter(config, env=os.environ.copy())
+        FAILOVER = FailoverManager(adapter=ADAPTER, sanitizer=SecuritySanitizer, config=config)
+
+    if timeout_seconds is not None:
+        adapter = ADAPTER if normalized_mode is not None else _get_adapter()
+        if hasattr(adapter, "timeout_seconds"):
+            adapter.timeout_seconds = timeout_seconds
 
     return json.dumps(
         {
             "status": "ok",
             "changes": changes,
             "effective": {
+                "transport_mode": runtime.get("transport_mode", "subprocess"),
                 "subprocess_timeout_seconds": runtime.get("subprocess_timeout_seconds"),
                 "ollama_timeout_seconds": runtime.get("ollama_timeout_seconds"),
             },

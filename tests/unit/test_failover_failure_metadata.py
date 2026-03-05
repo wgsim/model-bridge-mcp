@@ -2,7 +2,7 @@ from model_bridge.core.failover_manager import FailoverManager
 
 
 class _AlwaysFailAdapter:
-    async def run_async(self, service_name, args, input_text):
+    async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
         return False, f"{service_name}-failed"
 
 

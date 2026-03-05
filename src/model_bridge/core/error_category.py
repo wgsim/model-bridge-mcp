@@ -150,12 +150,3 @@ class ErrorInfo:
             ErrorCategory.TOKEN_LIMIT_EXCEEDED: "Reduce prompt length or increase max_output_tokens",
         }
         return actions.get(category, "Contact support")
-
-
-def is_retryable(category: ErrorCategory) -> bool:
-    """Check if an error category is retryable."""
-    return category in {
-        ErrorCategory.RATE_LIMITED,
-        ErrorCategory.TIMEOUT,
-        ErrorCategory.PROVIDER_UNAVAILABLE,
-    }
