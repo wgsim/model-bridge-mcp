@@ -121,3 +121,18 @@ class TestSetConfig:
 
         assert payload["status"] == "error"
         assert "transport_mode must be one of" in payload["error"]
+
+    def test_set_config_invalid_transport_mode_is_atomic(self, monkeypatch):
+        config = self._mock_config()
+        before_runtime = dict(config["runtime"])
+        monkeypatch.setattr(main_module, "_get_config", lambda: config)
+
+        result = main_module.set_config(timeout_seconds=180.0, transport_mode="cli")
+        payload = json.loads(result)
+
+        assert payload["status"] == "error"
+        assert config["runtime"]["transport_mode"] == before_runtime["transport_mode"]
+        assert (
+            config["runtime"]["subprocess_timeout_seconds"]
+            == before_runtime["subprocess_timeout_seconds"]
+        )

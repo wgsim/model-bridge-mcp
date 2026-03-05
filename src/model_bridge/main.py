@@ -1835,14 +1835,7 @@ def set_config(
     runtime = config.get("runtime", {})
     changes = {}
 
-    if ollama_timeout_seconds is not None:
-        runtime["ollama_timeout_seconds"] = ollama_timeout_seconds
-        changes["ollama_timeout_seconds"] = ollama_timeout_seconds
-
-    if timeout_seconds is not None:
-        runtime["subprocess_timeout_seconds"] = timeout_seconds
-        changes["subprocess_timeout_seconds"] = timeout_seconds
-
+    normalized_mode: str | None = None
     if transport_mode is not None:
         normalized_mode = transport_mode.strip().lower()
         if normalized_mode not in {"subprocess", "sdk"}:
@@ -1853,13 +1846,23 @@ def set_config(
                 },
                 ensure_ascii=False,
             )
+
+    if ollama_timeout_seconds is not None:
+        runtime["ollama_timeout_seconds"] = ollama_timeout_seconds
+        changes["ollama_timeout_seconds"] = ollama_timeout_seconds
+
+    if timeout_seconds is not None:
+        runtime["subprocess_timeout_seconds"] = timeout_seconds
+        changes["subprocess_timeout_seconds"] = timeout_seconds
+
+    if normalized_mode is not None:
         runtime["transport_mode"] = normalized_mode
         changes["transport_mode"] = normalized_mode
         ADAPTER = build_adapter(config, env=os.environ.copy())
         FAILOVER = FailoverManager(adapter=ADAPTER, sanitizer=SecuritySanitizer, config=config)
 
     if timeout_seconds is not None:
-        adapter = ADAPTER if transport_mode is not None else _get_adapter()
+        adapter = ADAPTER if normalized_mode is not None else _get_adapter()
         if hasattr(adapter, "timeout_seconds"):
             adapter.timeout_seconds = timeout_seconds
 
