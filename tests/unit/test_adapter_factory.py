@@ -53,6 +53,28 @@ def test_build_adapter_rejects_unknown_mode():
         build_adapter(config, env={})
 
 
+def test_build_adapter_subprocess_forwards_extra_path_and_env_vars(monkeypatch):
+    config = _base_config()
+    captured: dict = {}
+
+    class FakeSubprocessAdapter:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("model_bridge.adapters.factory.SubprocessAdapter", FakeSubprocessAdapter)
+
+    adapter = build_adapter(
+        config,
+        env={"PATH": "/usr/bin"},
+        extra_path=["/opt/custom/bin"],
+        extra_env_vars={"GOOGLE_CLOUD_PROJECT": "demo-project"},
+    )
+
+    assert isinstance(adapter, FakeSubprocessAdapter)
+    assert captured["extra_path"] == ["/opt/custom/bin"]
+    assert captured["extra_env_vars"] == {"GOOGLE_CLOUD_PROJECT": "demo-project"}
+
+
 def test_sdk_adapter_returns_auth_error_for_codex_without_credentials():
     config = _base_config()
     config["runtime"]["transport_mode"] = "sdk"

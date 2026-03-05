@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from importlib import resources
 from pathlib import Path
 from typing import Any, Literal
@@ -140,6 +141,11 @@ class RuntimeConfig(BaseModel):
     apply_system_suffix: RuntimeApplySystemSuffix
     transport_mode: Literal["subprocess", "sdk"] = "subprocess"
     subprocess_timeout_seconds: float = Field(default=120.0, gt=0)
+    extra_path: list[str] = Field(default_factory=list)
+    extra_env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional environment variables for CLI providers (e.g., GOOGLE_CLOUD_PROJECT)",
+    )
     ollama_timeout_seconds: float = Field(default=300.0, gt=0)
     ask_defaults: AskDefaultsConfig = Field(default_factory=AskDefaultsConfig)
     prompt_cache_enabled: bool = True
@@ -203,8 +209,46 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
         raise ConfigError(f"CONFIG_SCHEMA_ERROR: {exc}") from exc
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Deep merge two dictionaries, with override values taking precedence."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+_LOCAL_CONFIG_PATH = Path.home() / ".model_bridge" / "local.yaml"
+
+
 def load_config(config_path: str | None = None) -> dict[str, Any]:
-    raw = _load_yaml_from_path(Path(config_path)) if config_path else _load_default_yaml()
+    """Load config with optional local overlay.
+
+    Priority (highest first):
+    1. Explicit config_path (if provided)
+    2. Local user config (~/.model_bridge/local.yaml)
+    3. Default package config
+
+    Local config is merged on top of default config using deep merge.
+    """
+    # Load base config
+    if config_path:
+        raw = _load_yaml_from_path(Path(config_path))
+    else:
+        raw = _load_default_yaml()
+
+    # Overlay local config if it exists (only when using default config)
+    if not config_path and _LOCAL_CONFIG_PATH.exists():
+        try:
+            local_raw = _load_yaml_from_path(_LOCAL_CONFIG_PATH)
+            raw = _deep_merge(raw, local_raw)
+        except ConfigError as e:
+            # Local config is optional, but warn user if it's malformed
+            logger = logging.getLogger(__name__)
+            logger.warning("Failed to load local config %s: %s", _LOCAL_CONFIG_PATH, e)
+
     return normalize_config(raw)
 
 

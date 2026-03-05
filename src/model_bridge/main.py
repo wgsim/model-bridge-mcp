@@ -68,7 +68,13 @@ def build_runtime(config: Optional[dict] = None) -> tuple[dict, BaseAdapter, Fai
         block_patterns=resolved_config["security"]["block_patterns"],
         sensitive_paths=resolved_config["security"]["sensitive_paths"],
     )
-    adapter = build_adapter(resolved_config, env=os.environ.copy())
+    runtime_config = resolved_config.get("runtime", {})
+    adapter = build_adapter(
+        resolved_config,
+        env=os.environ.copy(),
+        extra_path=runtime_config.get("extra_path"),
+        extra_env_vars=runtime_config.get("extra_env_vars"),
+    )
     failover = FailoverManager(adapter=adapter, sanitizer=SecuritySanitizer, config=resolved_config)
     return resolved_config, adapter, failover
 
@@ -954,10 +960,8 @@ async def ask_chatgpt_cli(
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
 
-    # P2-1: Use weighted routing if configured
-    primary_provider = _select_provider_by_weight("ask_chatgpt_cli")
-    if primary_provider is None:
-        primary_provider = "codex"
+    # Keep primary aligned with function identity: ask_chatgpt_cli => codex.
+    primary_provider = "codex"
     secondary_provider = "gemini"
 
     response = ""
@@ -1021,10 +1025,8 @@ async def ask_gemini_cli(
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
 
-    # P2-1: Use weighted routing if configured
-    primary_provider = _select_provider_by_weight("ask_gemini_cli")
-    if primary_provider is None:
-        primary_provider = "gemini"
+    # Keep primary aligned with function identity: ask_gemini_cli => gemini.
+    primary_provider = "gemini"
     secondary_provider = "codex"
 
     response = ""
@@ -1723,6 +1725,14 @@ def health_check() -> str:
     config = _get_config()
     commands = config.get("commands", {})
     runtime = config.get("runtime", {})
+
+    # Sync PATH with adapter's expanded PATH (includes version manager paths)
+    try:
+        adapter = _get_adapter()
+        if adapter and adapter.env.get("PATH"):
+            os.environ["PATH"] = adapter.env["PATH"]
+    except Exception:
+        pass
 
     providers_status = {}
     transport_mode = str(runtime.get("transport_mode", "subprocess")).strip().lower()

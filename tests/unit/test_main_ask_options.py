@@ -180,6 +180,23 @@ def test_ask_chatgpt_cli_passes_model_override_to_primary_provider(monkeypatch):
     assert fake_failover.last["provider_args"] == {"codex": ["--model", "gpt-5"]}
 
 
+def test_ask_chatgpt_cli_keeps_codex_primary_even_if_weighted_selector_differs(monkeypatch):
+    fake_failover = _CaptureProviderArgsFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: "gemini")
+
+    class FakeAdapter:
+        def preflight_check(self, provider):
+            return True, ""
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeAdapter())
+    out = asyncio.run(main_module.ask_chatgpt_cli("hi", model="gpt-5"))
+
+    assert out == "ok"
+    assert fake_failover.last["primary"] == "codex"
+    assert fake_failover.last["provider_args"] == {"codex": ["--model", "gpt-5"]}
+
+
 def test_ask_gemini_cli_passes_model_override_to_primary_provider(monkeypatch):
     fake_failover = _CaptureProviderArgsFailover()
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
@@ -191,6 +208,25 @@ def test_ask_gemini_cli_passes_model_override_to_primary_provider(monkeypatch):
     assert out == "ok"
     assert fake_failover.last["primary"] == "gemini"
     assert fake_failover.last["provider_args"] == {"gemini": ["--model", "gemini-2.5-pro"]}
+
+
+def test_ask_gemini_cli_keeps_gemini_primary_even_if_weighted_selector_differs(monkeypatch):
+    fake_failover = _CaptureProviderArgsFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: "codex")
+
+    class FakeAdapter:
+        def preflight_check(self, provider):
+            return True, ""
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeAdapter())
+    out = asyncio.run(main_module.ask_gemini_cli("hi", model="gemini-2.5-pro"))
+
+    assert out == "ok"
+    assert fake_failover.last["primary"] == "gemini"
+    assert fake_failover.last["provider_args"] == {
+        "gemini": ["--model", "gemini-2.5-pro"]
+    }
 
 
 def test_ask_claude_code_passes_model_override_to_primary_provider(monkeypatch):

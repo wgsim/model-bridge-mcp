@@ -53,11 +53,11 @@ models:
     - "default"
     - "coder"
   codex_model_catalog:
+    - "gpt-5.3-codex"
     - "gpt-5.1-codex-mini"
     - "gpt-5.1-codex-max"
     - "gpt-5.2"
     - "gpt-5.2-codex"
-    - "gpt-5.3-codex"
   gemini_model_catalog:
     - "gemini-2.5-flash-lite"
     - "gemini-2.5-flash"
@@ -88,6 +88,18 @@ runtime:
   transport_mode: "subprocess"
   subprocess_timeout_seconds: 120
   ollama_timeout_seconds: 300
+  # Additional PATH directories for CLI discovery (highest priority)
+  # Useful when CLIs are installed in non-standard locations
+  # Example: extra_path: ["~/custom/bin", "/opt/tools/bin"]
+  extra_path: []
+  # Additional environment variables for CLI providers
+  # Useful when shell profiles (.bashrc, .zshrc) are not loaded by MCP server
+  # Common vars: GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, OPENAI_API_KEY, etc.
+  # Example:
+  #   extra_env_vars:
+  #     GOOGLE_CLOUD_PROJECT: "my-project-id"
+  #     GOOGLE_CLOUD_LOCATION: "us-central1"
+  extra_env_vars: {}
   ask_defaults:
     timeout_seconds: 120
     max_output_tokens: 0

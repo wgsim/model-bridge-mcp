@@ -387,3 +387,38 @@ def test_run_raw_mode_keeps_startup_noise_lines():
 
     assert ok is True
     assert output == noisy_output.strip()
+
+
+def test_extra_env_vars_are_passed_to_subprocess():
+    """Test that extra_env_vars are applied to subprocess environment."""
+    adapter = SubprocessAdapter(
+        _build_config(),
+        env={"PATH": "/usr/bin"},
+        extra_env_vars={
+            "GOOGLE_CLOUD_PROJECT": "test-project",
+            "GOOGLE_CLOUD_LOCATION": "us-central1",
+        },
+    )
+
+    # Check that env vars are in adapter's environment
+    assert adapter.env["GOOGLE_CLOUD_PROJECT"] == "test-project"
+    assert adapter.env["GOOGLE_CLOUD_LOCATION"] == "us-central1"
+
+
+def test_extra_env_vars_override_existing_values():
+    """Test that extra_env_vars take precedence over existing env values."""
+    adapter = SubprocessAdapter(
+        _build_config(),
+        env={"PATH": "/usr/bin", "GOOGLE_CLOUD_PROJECT": "old-project"},
+        extra_env_vars={"GOOGLE_CLOUD_PROJECT": "new-project"},
+    )
+
+    assert adapter.env["GOOGLE_CLOUD_PROJECT"] == "new-project"
+
+
+def test_extra_env_vars_empty_by_default():
+    """Test that adapter works without extra_env_vars."""
+    adapter = SubprocessAdapter(_build_config(), env={"PATH": "/usr/bin"})
+
+    # Should not have provider env vars unless discovered
+    assert "GOOGLE_CLOUD_PROJECT" not in adapter.env

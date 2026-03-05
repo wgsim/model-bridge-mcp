@@ -32,6 +32,76 @@ The default configuration file is `src/model_bridge/config/default.yaml`.
 - `runtime.system_suffix`: CLI prompt suffix
 - `runtime.apply_system_suffix`: per-service suffix application policy
 - `runtime.transport_mode`: `subprocess` (default) or `sdk` (scaffold)
+- `runtime.extra_path`: additional PATH directories for CLI discovery (see below)
+
+### CLI Path Discovery
+
+MCP server automatically discovers CLI tools installed via version managers:
+
+**Auto-detected paths:**
+- **Node.js**: nvm (`~/.nvm/versions/node/*/bin`), fnm, volta
+- **Python**: pyenv, conda (miniconda3/anaconda3)
+- **Ruby**: rbenv, rvm
+- **Rust**: cargo (`~/.cargo/bin`)
+- **Go**: `~/.go/bin`, `~/go/bin`
+- **User local**: `~/.local/bin`
+
+**User-specified paths (highest priority):**
+
+If auto-discovery fails or you need custom paths, add them in config:
+
+```yaml
+runtime:
+  extra_path:
+    - /custom/path/to/bin
+    - ~/another/path
+```
+
+Priority order (highest first):
+1. User-specified `extra_path` from config
+2. Auto-discovered version manager paths
+3. System PATH at MCP server startup
+
+### Environment Variables
+
+Some CLI providers require environment variables for authentication (e.g., Google Cloud Vertex AI). MCP servers may not inherit shell profile variables due to non-interactive shell execution.
+
+Configure required environment variables:
+
+```yaml
+runtime:
+  extra_env_vars:
+    GOOGLE_CLOUD_PROJECT: "your-project-id"
+    GOOGLE_CLOUD_LOCATION: "us-central1"
+    # Other provider vars as needed:
+    # OPENAI_API_KEY: "sk-..."
+    # ANTHROPIC_API_KEY: "sk-ant-..."
+```
+
+Priority order (highest first):
+1. User-specified `extra_env_vars` from config
+2. Auto-discovered from login shell (if accessible)
+3. MCP server process environment
+
+### Local Config File
+
+For machine-specific settings (API keys, project IDs, paths), use a local config file that won't be committed to git:
+
+**Location**: `~/.model_bridge/local.yaml`
+
+```yaml
+# ~/.model_bridge/local.yaml
+runtime:
+  extra_env_vars:
+    GOOGLE_CLOUD_PROJECT: "your-project-id"
+    GOOGLE_CLOUD_LOCATION: "us-central1"
+  extra_path:
+    - ~/custom/bin
+```
+
+**Merge behavior**: Local config is deep-merged on top of the default config. Only specify values you want to override.
+
+**Note**: List fields (like `extra_path`) are **replaced**, not concatenated. If default has `extra_path: ["/a"]` and local has `extra_path: ["~/b"]`, the result is `["~/b"]` only.
 
 Config loader verification:
 ```bash
@@ -240,7 +310,7 @@ Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code")` to in
   - `models.claude_code_model_catalog`
 - Each non-ollama provider includes `model_flag="--model"` and configured command metadata.
 - Current default catalogs:
-  - `codex`: `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.3-codex`
+  - `codex`: `gpt-5.3-codex`, `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.2-codex`
   - `gemini`: `gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3-pro-preview`
   - `claude_code`: `haiku`, `sonnet`, `opus`
 - Note: some Gemini preview models may require additional internal flags/account enablement.

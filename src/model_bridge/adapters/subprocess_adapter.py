@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import shutil
 import subprocess
 import time
+from pathlib import Path
 from typing import Mapping, Sequence, Tuple
 
 from .base import CLIAdapter
+
+logger = logging.getLogger("model_bridge.subprocess_adapter")
 
 _INSTALL_HINTS: dict[str, str] = {
     "codex": "Install: brew install --cask codex (or npm install -g @openai/codex)",
@@ -18,6 +22,285 @@ _INSTALL_HINTS: dict[str, str] = {
     "ollama": "Install: brew install --cask ollama (or https://ollama.ai/download)",
     "claude": "Install: brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
 }
+
+# Shells to try for login shell discovery (in order of preference)
+_LOGIN_SHELLS = ["bash", "zsh", "sh"]
+
+# Common version manager directory patterns to scan directly
+_VERSION_MANAGER_DIRS = [
+    # Node.js - nvm
+    ("~/.nvm/versions/node", "bin"),  # nvm versions
+    ("~/.fnm", "bin"),                 # fnm
+    ("~/.volta", "bin"),               # volta
+    # Python
+    ("~/.pyenv/versions", "bin"),      # pyenv versions
+    ("~/.pyenv", "shims"),             # pyenv shims
+    ("~/miniconda3", "bin"),           # conda
+    ("~/anaconda3", "bin"),
+    # Ruby
+    ("~/.rbenv", "shims"),             # rbenv
+    ("~/.rbenv", "bin"),
+    ("~/.rvm", "bin"),                 # rvm
+    # Rust
+    ("~/.cargo", "bin"),               # cargo/rustup
+    # Go
+    ("~/.go", "bin"),
+    ("~/go", "bin"),
+    # User local
+    ("~/.local", "bin"),
+]
+
+# Environment variables to inherit from login shell for provider authentication
+_PROVIDER_ENV_VARS = [
+    # Google Cloud / Gemini
+    "GOOGLE_API_KEY",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_LOCATION",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    # OpenAI / Codex
+    "OPENAI_API_KEY",
+    # Anthropic / Claude
+    "ANTHROPIC_API_KEY",
+    # AWS
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_REGION",
+    # Azure
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+]
+
+
+def _is_safe_command_name(name: str) -> bool:
+    """Validate command name contains only safe characters to prevent injection."""
+    return bool(re.match(r"^[a-zA-Z0-9_-]+$", name))
+
+
+def _is_safe_env_var_name(name: str) -> bool:
+    """Validate env var name contains only safe characters."""
+    return bool(re.match(r"^[A-Z][A-Z0-9_]*$", name))
+
+
+def _discover_provider_env_vars(timeout: float = 3.0) -> dict[str, str]:
+    """
+    Discover provider authentication env vars from login shell.
+
+    This allows MCP server to inherit authentication that users have
+    configured in their shell profiles (.bashrc, .zshrc, etc.).
+
+    Security considerations:
+    - Only reads whitelisted env vars (_PROVIDER_ENV_VARS)
+    - Values are never logged
+    - Used only for subprocess execution within user's own system
+
+    Args:
+        timeout: Maximum time to wait for shell response
+
+    Returns:
+        Dict of env var name -> value (only non-empty values)
+    """
+    discovered: dict[str, str] = {}
+
+    for shell in _LOGIN_SHELLS:
+        try:
+            # Build a command that prints all whitelisted env vars
+            # Format: NAME=value (one per line, only if set)
+            var_checks = " || ".join(
+                f'[ -n "${var}" ] && echo "{var}=${var}"'
+                for var in _PROVIDER_ENV_VARS
+            )
+            cmd = f'{var_checks}'
+
+            result = subprocess.run(
+                [shell, "-lc", cmd],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().splitlines():
+                    if "=" in line:
+                        name, value = line.split("=", 1)
+                        if _is_safe_env_var_name(name) and value:
+                            discovered[name] = value
+                break  # Success, no need to try other shells
+
+        except subprocess.TimeoutExpired:
+            logger.debug("Login shell %s timed out while discovering env vars", shell)
+        except FileNotFoundError:
+            logger.debug("Shell %s not found, trying next", shell)
+        except Exception as e:
+            logger.debug("Error using %s to discover env vars: %s", shell, e)
+
+    return discovered
+
+
+def _discover_cli_path_via_login_shell(command: str, timeout: float = 3.0) -> str | None:
+    """
+    Discover CLI path using login shell (loads .bashrc/.zshrc).
+
+    This allows finding CLIs installed via version managers (nvm, pyenv, etc.)
+    that add paths dynamically in shell config files.
+
+    Args:
+        command: CLI command name to find (e.g., 'codex', 'gemini')
+        timeout: Maximum time to wait for shell response
+
+    Returns:
+        Absolute path to CLI or None if not found
+    """
+    if not _is_safe_command_name(command):
+        logger.warning("Invalid command name rejected: %s", command)
+        return None
+
+    for shell in _LOGIN_SHELLS:
+        try:
+            result = subprocess.run(
+                [shell, "-lc", f"which {command}"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                path = result.stdout.strip().split("\n")[0]  # Take first match
+                if os.path.isabs(path) and os.path.exists(path):
+                    logger.debug("Found %s via %s login shell: %s", command, shell, path)
+                    return path
+        except subprocess.TimeoutExpired:
+            logger.debug("Login shell %s timed out while searching for %s", shell, command)
+        except FileNotFoundError:
+            logger.debug("Shell %s not found, trying next", shell)
+        except Exception as e:
+            logger.debug("Error using %s to find %s: %s", shell, command, e)
+
+    return None
+
+
+def _discover_cli_path_by_direct_scan(command: str) -> str | None:
+    """
+    Discover CLI path by directly scanning common version manager directories.
+
+    This is a fallback when login shell discovery fails (e.g., when .bashrc
+    has an interactive shell guard that prevents nvm from loading).
+
+    Args:
+        command: CLI command name to find (e.g., 'codex', 'gemini')
+
+    Returns:
+        Absolute path to CLI or None if not found
+    """
+    if not _is_safe_command_name(command):
+        return None
+
+    home = Path.home()
+
+    for base_pattern, subdir in _VERSION_MANAGER_DIRS:
+        base_dir = Path(base_pattern.replace("~", str(home)))
+
+        if not base_dir.exists():
+            continue
+
+        # Handle version directories (e.g., nvm/versions/node/v24.13.1/bin)
+        if base_dir.is_dir():
+            # Check if it's a version container (has version subdirs)
+            try:
+                version_dirs = sorted(
+                    [d for d in base_dir.iterdir() if d.is_dir()],
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                # Check version subdirs first (most recent)
+                for version_dir in version_dirs[:5]:  # Limit to 5 most recent
+                    candidate = version_dir / subdir / command
+                    if candidate.exists() and candidate.is_file():
+                        logger.debug(
+                            "Found %s via direct scan: %s", command, candidate
+                        )
+                        return str(candidate)
+                # Also check base_dir/subdir directly
+                candidate = base_dir / subdir / command
+                if candidate.exists() and candidate.is_file():
+                    logger.debug("Found %s via direct scan: %s", command, candidate)
+                    return str(candidate)
+            except (OSError, PermissionError):
+                continue
+
+    return None
+
+
+def _discover_cli_path(command: str) -> str | None:
+    """
+    Discover CLI path using multiple strategies.
+
+    1. First try login shell (may work if .bashrc has no interactive guard)
+    2. Fall back to direct directory scanning (handles nvm/pyenv/etc)
+
+    Args:
+        command: CLI command name to find
+
+    Returns:
+        Absolute path to CLI or None if not found
+    """
+    # Strategy 1: Login shell
+    path = _discover_cli_path_via_login_shell(command)
+    if path:
+        return path
+
+    # Strategy 2: Direct scan of version manager directories
+    path = _discover_cli_path_by_direct_scan(command)
+    if path:
+        return path
+
+    return None
+
+
+def _expand_path_with_discovered_clis(
+    cli_commands: Sequence[str],
+    current_path: str,
+    extra_paths: Sequence[str] | None = None,
+) -> str:
+    """
+    Expand PATH with directories containing discovered CLI tools.
+
+    Priority order (highest first):
+    1. User-specified extra_paths
+    2. Auto-discovered version manager paths
+    3. Current PATH
+
+    Args:
+        cli_commands: List of CLI command names to discover
+        current_path: Current PATH value
+        extra_paths: User-specified additional paths (highest priority)
+
+    Returns:
+        Expanded PATH with discovered CLI directories prepended
+    """
+    paths_to_add: list[str] = []
+
+    # 1. User-specified extra paths (highest priority)
+    if extra_paths:
+        for p in extra_paths:
+            expanded = Path(p).expanduser()
+            if expanded.exists() and str(expanded) not in current_path:
+                if str(expanded) not in paths_to_add:
+                    paths_to_add.append(str(expanded))
+                    logger.info("Added user-specified path: %s", expanded)
+
+    # 2. Auto-discovered CLI paths
+    for cmd in cli_commands:
+        path = _discover_cli_path(cmd)
+        if path:
+            cmd_dir = os.path.dirname(path)
+            if cmd_dir not in current_path and cmd_dir not in paths_to_add:
+                paths_to_add.append(cmd_dir)
+                logger.info("Discovered CLI path for '%s': %s", cmd, cmd_dir)
+
+    if paths_to_add:
+        return ":".join(paths_to_add) + ":" + current_path
+    return current_path
 
 
 class SubprocessAdapter(CLIAdapter):
@@ -30,6 +313,8 @@ class SubprocessAdapter(CLIAdapter):
         system_suffix: str = "",
         apply_system_suffix_for: Mapping[str, bool] | None = None,
         timeout_seconds: float | None = None,
+        extra_path: Sequence[str] | None = None,
+        extra_env_vars: Mapping[str, str] | None = None,
     ) -> None:
         self.cli_config = cli_config
         self.env = dict(env) if env is not None else os.environ.copy()
@@ -37,6 +322,50 @@ class SubprocessAdapter(CLIAdapter):
         self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
         self.timeout_seconds = timeout_seconds
         self._preflight_cache: dict[str, tuple[bool, str, float]] = {}
+        self._extra_path = list(extra_path) if extra_path else None
+        self._extra_env_vars = dict(extra_env_vars) if extra_env_vars else None
+
+        # Discover CLI paths and expand PATH
+        self._expand_path_with_cli_discovery()
+
+    def _expand_path_with_cli_discovery(self) -> None:
+        """Expand PATH with directories from discovered CLI tools."""
+        # Extract unique command names from cli_config
+        commands_to_discover: set[str] = set()
+        for service_config in self.cli_config.values():
+            exec_cmd = service_config.get("exec", [])
+            if exec_cmd:
+                commands_to_discover.add(exec_cmd[0])
+
+        if not commands_to_discover and not self._extra_path:
+            return
+
+        current_path = self.env.get("PATH", "")
+        expanded_path = _expand_path_with_discovered_clis(
+            list(commands_to_discover),
+            current_path,
+            self._extra_path,
+        )
+
+        if expanded_path != current_path:
+            self.env["PATH"] = expanded_path
+            logger.info("PATH expanded with discovered CLI directories")
+
+        # Discover provider authentication env vars from login shell
+        self._discover_provider_env_vars()
+
+        # Apply user-specified extra_env_vars (highest priority)
+        if self._extra_env_vars:
+            self.env.update(self._extra_env_vars)
+            logger.info("Applied %d user-configured env vars", len(self._extra_env_vars))
+
+    def _discover_provider_env_vars(self) -> None:
+        """Discover and inject provider authentication env vars from login shell."""
+        discovered = _discover_provider_env_vars()
+        if discovered:
+            self.env.update(discovered)
+            # Log without exposing values
+            logger.info("Discovered %d provider env vars from login shell", len(discovered))
 
     _PREFLIGHT_CACHE_TTL = 60.0
 
