@@ -12,7 +12,7 @@ class _FakeAdapter:
         self.calls.append((service_name, list(args), input_text))
         return self.responses[(service_name, tuple(args))]
 
-    async def run_async(self, service_name, args, input_text):
+    async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
         return self.run(service_name, args, input_text)
 
 
@@ -155,7 +155,7 @@ def test_execute_async_uses_async_adapter_path():
         def __init__(self):
             self.calls = []
 
-        async def run_async(self, service_name, args, input_text):
+        async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
             self.calls.append((service_name, list(args), input_text))
             return True, "async-primary-ok"
 

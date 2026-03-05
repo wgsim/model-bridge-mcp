@@ -22,7 +22,7 @@ class _FakeFailover:
 
 
 class _FakeAdapter:
-    async def run_async(self, service_name, args, input_text):
+    async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
         return True, f"{service_name}:{args[0]}:{input_text}"
 
 
