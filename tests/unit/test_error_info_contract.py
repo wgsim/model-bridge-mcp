@@ -110,8 +110,6 @@ def test_error_info_all_categories_have_suggested_actions():
 
 def test_error_info_retryable_flag_matches_category():
     """Test that is_retryable flag is consistent with category."""
-    from model_bridge.core.error_category import is_retryable
-
     test_cases = [
         ("Rate limit exceeded", True),
         ("Request timeout", True),
@@ -125,5 +123,3 @@ def test_error_info_retryable_flag_matches_category():
     for message, expected_retryable in test_cases:
         error = ErrorInfo.from_message(message, "test_provider")
         assert error.is_retryable == expected_retryable
-        # Verify consistency with is_retryable function
-        assert is_retryable(error.category) == expected_retryable

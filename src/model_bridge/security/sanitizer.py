@@ -25,29 +25,32 @@ class SecuritySanitizer:
         r"/root/",
     ]
 
-    BLOCK_PATTERNS = list(DEFAULT_BLOCK_PATTERNS)
-    SENSITIVE_PATHS = list(DEFAULT_SENSITIVE_PATHS)
+    def __init__(
+        self,
+        block_patterns: list[str] | None = None,
+        sensitive_paths: list[str] | None = None,
+    ) -> None:
+        self.block_patterns = list(
+            block_patterns if block_patterns is not None else self.DEFAULT_BLOCK_PATTERNS
+        )
+        self.sensitive_paths = list(
+            sensitive_paths if sensitive_paths is not None else self.DEFAULT_SENSITIVE_PATHS
+        )
 
-    @classmethod
-    def configure(cls, block_patterns: list[str], sensitive_paths: list[str]) -> None:
-        cls.BLOCK_PATTERNS = list(block_patterns)
-        cls.SENSITIVE_PATHS = list(sensitive_paths)
-
-    @classmethod
-    def inspect(cls, prompt: str, mode: str = "execution") -> tuple[bool, str]:
+    def inspect(self, prompt: str, mode: str = "execution") -> tuple[bool, str]:
         normalized_mode = (mode or "execution").strip().lower()
         if normalized_mode not in {"execution", "analysis"}:
             logging.getLogger("model_bridge.security").warning(
                 "Unknown inspect mode '%s'; using execution safeguards.", mode
             )
-        for pattern in cls.BLOCK_PATTERNS:
+        for pattern in self.block_patterns:
             if re.search(pattern, prompt):
                 return (
                     False,
                     f"[SECURITY BLOCK] Destructive command pattern detected ({pattern}). Execution blocked.",
                 )
 
-        for path in cls.SENSITIVE_PATHS:
+        for path in self.sensitive_paths:
             if path in prompt:
                 logging.getLogger("model_bridge.security").warning(
                     "Sensitive path access blocked in %s mode: %s", normalized_mode, path

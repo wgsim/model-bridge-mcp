@@ -9,7 +9,7 @@ from model_bridge.core.failover_manager import FailoverManager
 
 
 class _ContractAdapter:
-    async def run_async(self, service_name, args, input_text):
+    async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
         if service_name == "codex":
             return False, "primary-fail"
         if service_name == "gemini":
