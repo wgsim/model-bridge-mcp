@@ -69,6 +69,7 @@ def test_load_config_from_default_succeeds():
     assert "claude_code_model_catalog" in config["models"]
     assert "ollama_resource_guard_enabled" in config["runtime"]
     assert "ollama_model_memory_gb" in config["runtime"]
+    assert config["runtime"]["transport_mode"] == "subprocess"
 
 
 def test_load_config_missing_file_raises_config_not_found():
@@ -253,6 +254,43 @@ runtime:
     cfg = load_config(str(config_path))
     assert "claude_code" in cfg["commands"]
     assert cfg["runtime"]["apply_system_suffix"]["claude_code"] is False
+
+
+def test_load_config_invalid_transport_mode_raises_schema_error(tmp_path: Path):
+    config_path = _write_yaml(
+        tmp_path / "invalid-transport-mode.yaml",
+        """
+commands:
+  codex: {exec: [codex, exec], health: [codex, --version]}
+  gemini: {exec: [gemini], health: [gemini, --version]}
+  ollama: {exec: [ollama, run], health: [ollama, --version]}
+routing:
+  default_chains:
+    ask_chatgpt_cli: [codex, gemini, ollama]
+    ask_gemini_cli: [gemini, codex, ollama]
+    ask_ollama_cloud_fallback: [codex, gemini]
+models:
+  ollama_default_model: llama3.2
+  ollama_final_backup_model: qwen3-coder:30b-a3b-q8_0
+  ollama_catalog: [llama3.2, qwen3-coder:30b-a3b-q8_0]
+  ollama_aliases:
+    default: llama3.2
+    coder: qwen3-coder:30b-a3b-q8_0
+  ollama_local_fallback_chain: [default, coder]
+security:
+  block_patterns: [a]
+  sensitive_paths: [/etc/]
+runtime:
+  system_suffix: "x"
+  transport_mode: "cli"
+  apply_system_suffix:
+    codex: true
+    gemini: true
+    ollama: false
+""",
+    )
+    with pytest.raises(ConfigError, match="CONFIG_SCHEMA_ERROR"):
+        load_config(str(config_path))
 
 
 def test_load_config_accepts_extra_env_vars(tmp_path: Path):

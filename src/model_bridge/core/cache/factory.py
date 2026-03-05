@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from model_bridge.core.cache.backend import CacheBackend, InMemoryCache
+from model_bridge.core.cache.backend import AsyncCacheBackend, CacheBackend, InMemoryCache
 
 logger = logging.getLogger("model_bridge.cache.factory")
 
 
-def create_cache(config: dict[str, Any] | None = None) -> CacheBackend:
+def create_cache(config: dict[str, Any] | None = None) -> CacheBackend | AsyncCacheBackend:
     """Create a cache backend based on configuration.
 
     Args:
@@ -73,7 +73,7 @@ def _create_redis_cache(
     cache_config: dict[str, Any],
     ttl_seconds: int,
     max_entries: int,
-) -> CacheBackend:
+) -> AsyncCacheBackend:
     """Create a Redis cache backend."""
     try:
         from model_bridge.core.cache.redis_cache import RedisCache, RedisCacheError
@@ -94,7 +94,7 @@ def _create_redis_cache(
         return InMemoryCache(ttl_seconds=ttl_seconds, max_entries=max_entries)
 
 
-def get_cache_backend_name(cache: CacheBackend) -> str:
+def get_cache_backend_name(cache: CacheBackend | AsyncCacheBackend) -> str:
     """Get the name of a cache backend.
 
     Args:
