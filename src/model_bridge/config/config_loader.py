@@ -7,7 +7,7 @@ import json
 import logging
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -139,6 +139,7 @@ class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     system_suffix: str
     apply_system_suffix: RuntimeApplySystemSuffix
+    transport_mode: Literal["subprocess", "sdk"] = "subprocess"
     subprocess_timeout_seconds: float = Field(default=120.0, gt=0)
     extra_path: list[str] = Field(default_factory=list)
     extra_env_vars: dict[str, str] = Field(

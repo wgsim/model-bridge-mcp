@@ -221,6 +221,7 @@ class TestHealthCheck:
         assert payload["config_defaults"]["subprocess_timeout_seconds"] == 120
         assert payload["config_defaults"]["ollama_timeout_seconds"] == 300
         assert payload["config_defaults"]["system_suffix_enabled"] is True
+        assert payload["config_defaults"]["transport_mode"] == "subprocess"
 
     def test_health_check_uses_runtime_package_version(self, monkeypatch):
         monkeypatch.setattr(
@@ -241,3 +242,76 @@ class TestHealthCheck:
         payload = json.loads(result)
 
         assert payload["version"] == "9.9.9"
+
+    def test_health_check_uses_sdk_preflight_in_sdk_mode(self, monkeypatch):
+        monkeypatch.setattr(
+            main_module,
+            "_get_config",
+            lambda: {
+                "commands": {},
+                "runtime": {
+                    "transport_mode": "sdk",
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
+            },
+        )
+
+        class FakeAdapter:
+            def __init__(self):
+                self.calls: list[str] = []
+
+            def preflight_check(self, service_name: str):
+                self.calls.append(service_name)
+                if service_name == "ollama":
+                    return False, "ollama offline"
+                return True, "ok"
+
+        adapter = FakeAdapter()
+        monkeypatch.setattr(main_module, "_get_adapter", lambda: adapter)
+        monkeypatch.setattr("shutil.which", lambda x: None)
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: pytest.fail("subprocess.run should not be called in sdk mode"),
+        )
+
+        result = main_module.health_check()
+        payload = json.loads(result)
+
+        assert payload["status"] == "healthy"
+        assert payload["providers"]["codex"]["available"] is True
+        assert payload["providers"]["codex"]["transport"] == "sdk"
+        assert payload["providers"]["codex"]["auth"] == "configured"
+        assert payload["providers"]["ollama"]["available"] is False
+        assert payload["providers"]["ollama"]["error"] == "ollama offline"
+        assert adapter.calls == ["codex", "gemini", "ollama", "claude_code"]
+
+    def test_health_check_sdk_mode_degraded_when_auth_missing(self, monkeypatch):
+        monkeypatch.setattr(
+            main_module,
+            "_get_config",
+            lambda: {
+                "commands": {},
+                "runtime": {
+                    "transport_mode": "sdk",
+                    "subprocess_timeout_seconds": 120,
+                    "ollama_timeout_seconds": 300,
+                    "system_suffix": "",
+                },
+            },
+        )
+
+        class FakeAdapter:
+            def preflight_check(self, service_name: str):  # pylint: disable=unused-argument
+                return False, "missing credentials"
+
+        monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeAdapter())
+
+        result = main_module.health_check()
+        payload = json.loads(result)
+
+        assert payload["status"] == "degraded"
+        assert payload["providers"]["codex"]["available"] is False
+        assert payload["providers"]["codex"]["error"] == "missing credentials"

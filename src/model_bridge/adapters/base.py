@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 from typing import Sequence, Tuple
 
 
-class CLIAdapter(ABC):
-    """Common interface for CLI-backed model adapters."""
+class BaseAdapter(ABC):
+    """Common execution interface for transport adapters."""
 
     @abstractmethod
     def run(
@@ -30,3 +30,11 @@ class CLIAdapter(ABC):
         strip_noise: bool = True,
     ) -> Tuple[bool, str]:
         """Run service command asynchronously and return (success, output)."""
+
+    @abstractmethod
+    def preflight_check(self, service_name: str) -> Tuple[bool, str]:
+        """Validate provider readiness for this transport."""
+
+
+# Backward-compat alias used by existing imports/tests.
+CLIAdapter = BaseAdapter
