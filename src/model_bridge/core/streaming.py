@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
 from typing import TYPE_CHECKING, AsyncIterator
 
 if TYPE_CHECKING:
@@ -156,7 +155,7 @@ async def run_with_streaming(
 ) -> tuple[bool, str]:
     """Run a command with streaming output.
 
-    Uses subprocess.run with argument lists (no shell) for safety.
+    Uses asyncio.create_subprocess_exec with argument lists (no shell) for safety.
 
     Args:
         command_args: Command and arguments as list
@@ -171,17 +170,28 @@ async def run_with_streaming(
     progress = StreamProgress(ctx=ctx, report_interval=report_interval)
     buffer = StreamingBuffer()
     try:
-        # Run subprocess without shell; timeout is enforced by subprocess itself.
-        result = subprocess.run(
-            command_args,
-            input=input_text if input_text is not None else None,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
+        process = await asyncio.create_subprocess_exec(
+            *command_args,
+            stdin=asyncio.subprocess.PIPE if input_text is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        stdout = result.stdout or ""
-        stderr = result.stderr or ""
+
+        stdin_bytes = input_text.encode() if input_text is not None else None
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(input=stdin_bytes),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            logger.error("Command timed out after %s seconds", timeout)
+            return False, f"[TIMEOUT] Command exceeded {timeout} seconds"
+
+        stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+        stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
 
         for line in stdout.splitlines(keepends=True):
             buffer.append(line)
@@ -189,13 +199,13 @@ async def run_with_streaming(
 
         await progress.finalize()
 
-        success = result.returncode == 0
+        success = process.returncode == 0
         output = buffer.get_content()
 
         if not success:
             logger.warning(
                 "Command failed with code %d: %s",
-                result.returncode,
+                process.returncode,
                 stderr[:200],
             )
             # Include stderr in output for error context
@@ -204,9 +214,6 @@ async def run_with_streaming(
 
         return success, output
 
-    except subprocess.TimeoutExpired:
-        logger.error("Command timed out after %s seconds", timeout)
-        return False, f"[TIMEOUT] Command exceeded {timeout} seconds"
     except Exception as e:
         logger.error("Command execution failed: %s", e)
         return False, f"[ERROR] {e}"

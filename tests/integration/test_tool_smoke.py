@@ -22,7 +22,7 @@ class _FakeFailover:
 
 
 class _FakeAdapter:
-    async def run_async(self, service_name, args, input_text):
+    async def run_async(self, service_name, args, input_text, timeout_seconds=None, strip_noise=True):
         return True, f"{service_name}:{args[0]}:{input_text}"
 
 
@@ -81,7 +81,11 @@ def test_ask_ollama_smoke_local_success(monkeypatch):
         "_get_installed_ollama_models",
         lambda: (["gpt-oss:20b", "qwen3-coder-next:Q4_K_M"], ""),
     )
-    monkeypatch.setattr(main_module.SecuritySanitizer, "inspect", classmethod(lambda cls, p, mode="execution": (True, "")))
+    class _AllowAllSanitizer:
+        def inspect(self, p, mode="execution"):
+            return True, ""
+
+    monkeypatch.setattr(main_module, "_get_sanitizer", lambda: _AllowAllSanitizer())
 
     result = asyncio.run(main_module.ask_ollama("hello local", model="default"))
 
