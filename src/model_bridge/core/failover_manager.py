@@ -43,8 +43,7 @@ def get_last_errors(count: int = 5) -> list[dict]:
 class SanitizerProtocol(Protocol):
     """Protocol for prompt sanitizer implementations."""
 
-    @staticmethod
-    def inspect(prompt: str, mode: str = "execution") -> tuple[bool, str]:
+    def inspect(self, prompt: str, mode: str = "execution") -> tuple[bool, str]:
         """Return (is_safe, message)."""
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from typing import Any
@@ -158,22 +159,22 @@ class RedisCache:
                 "error": str(e),
             }
 
-    # Synchronous wrappers for compatibility with CacheBackend protocol
-    # These are provided for backward compatibility but async versions should be preferred
+    # Synchronous wrappers for backward compatibility.
+    # New call sites should prefer async methods.
+    @staticmethod
+    def _run_sync(coro):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+        raise RedisCacheError(
+            "RedisCache sync wrapper called inside a running event loop; use await get/set instead."
+        )
 
     def get_sync(self, key: str) -> str | None:
-        """Synchronous get (uses sync redis client)."""
-        import asyncio
-        try:
-            return asyncio.get_event_loop().run_until_complete(self.get(key))
-        except RuntimeError:
-            # No event loop, create one
-            return asyncio.run(self.get(key))
+        """Synchronous get wrapper for compatibility."""
+        return self._run_sync(self.get(key))
 
     def set_sync(self, key: str, value: str, ttl_seconds: int | None = None) -> None:
-        """Synchronous set (uses sync redis client)."""
-        import asyncio
-        try:
-            asyncio.get_event_loop().run_until_complete(self.set(key, value, ttl_seconds))
-        except RuntimeError:
-            asyncio.run(self.set(key, value, ttl_seconds))
+        """Synchronous set wrapper for compatibility."""
+        self._run_sync(self.set(key, value, ttl_seconds))
