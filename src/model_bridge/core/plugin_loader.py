@@ -5,13 +5,10 @@ from __future__ import annotations
 import importlib.util
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from model_bridge.plugins.base import ProviderPlugin
 from model_bridge.core.provider_registry import ProviderCapabilities, ProviderSpec, ProviderRegistry
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger("model_bridge.plugin_loader")
 
