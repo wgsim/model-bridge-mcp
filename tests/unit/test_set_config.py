@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from model_bridge import main as main_module
+from model_bridge.runtime import Runtime
 
 
 class TestSetConfig:
@@ -28,12 +29,14 @@ class TestSetConfig:
 
     def test_set_timeout_updates_config(self, monkeypatch):
         config = self._mock_config()
-        monkeypatch.setattr(main_module, "_get_config", lambda: config)
 
         class FakeAdapter:
             timeout_seconds = 120.0
 
-        monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeAdapter())
+        monkeypatch.setattr(
+            main_module, "_RUNTIME",
+            Runtime(config=config, adapter=FakeAdapter(), failover=object(), sanitizer=object()),
+        )
 
         result = main_module.set_config(timeout_seconds=180.0)
         payload = json.loads(result)
@@ -44,7 +47,10 @@ class TestSetConfig:
 
     def test_set_ollama_timeout_updates_config(self, monkeypatch):
         config = self._mock_config()
-        monkeypatch.setattr(main_module, "_get_config", lambda: config)
+        monkeypatch.setattr(
+            main_module, "_RUNTIME",
+            Runtime(config=config, adapter=object(), failover=object(), sanitizer=object()),
+        )
 
         result = main_module.set_config(ollama_timeout_seconds=600.0)
         payload = json.loads(result)
@@ -55,12 +61,14 @@ class TestSetConfig:
 
     def test_set_both_timeouts(self, monkeypatch):
         config = self._mock_config()
-        monkeypatch.setattr(main_module, "_get_config", lambda: config)
 
         class FakeAdapter:
             timeout_seconds = 120.0
 
-        monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeAdapter())
+        monkeypatch.setattr(
+            main_module, "_RUNTIME",
+            Runtime(config=config, adapter=FakeAdapter(), failover=object(), sanitizer=object()),
+        )
 
         result = main_module.set_config(timeout_seconds=200.0, ollama_timeout_seconds=500.0)
         payload = json.loads(result)
@@ -69,7 +77,10 @@ class TestSetConfig:
 
     def test_set_config_no_changes(self, monkeypatch):
         config = self._mock_config()
-        monkeypatch.setattr(main_module, "_get_config", lambda: config)
+        monkeypatch.setattr(
+            main_module, "_RUNTIME",
+            Runtime(config=config, adapter=object(), failover=object(), sanitizer=object()),
+        )
 
         result = main_module.set_config()
         payload = json.loads(result)
@@ -79,20 +90,21 @@ class TestSetConfig:
 
     def test_set_config_updates_adapter_timeout(self, monkeypatch):
         config = self._mock_config()
-        monkeypatch.setattr(main_module, "_get_config", lambda: config)
 
         class FakeAdapter:
             timeout_seconds = 120.0
 
         adapter = FakeAdapter()
-        monkeypatch.setattr(main_module, "_get_adapter", lambda: adapter)
+        monkeypatch.setattr(
+            main_module, "_RUNTIME",
+            Runtime(config=config, adapter=adapter, failover=object(), sanitizer=object()),
+        )
 
         main_module.set_config(timeout_seconds=250.0)
         assert adapter.timeout_seconds == 250.0
 
     def test_set_config_transport_mode_rebuilds_adapter(self, monkeypatch):
         config = self._mock_config()
-        monkeypatch.setattr(main_module, "_get_config", lambda: config)
 
         class FakeAdapter:
             timeout_seconds = 120.0
@@ -111,6 +123,13 @@ class TestSetConfig:
                 self.adapter = adapter
                 captured["sanitizer"] = sanitizer
 
+        class FakeSanitizer:
+            pass
+
+        monkeypatch.setattr(
+            main_module, "_RUNTIME",
+            Runtime(config=config, adapter=FakeAdapter(), failover=object(), sanitizer=FakeSanitizer()),
+        )
         monkeypatch.setattr(main_module, "build_adapter", lambda cfg, env=None: FakeAdapter())
         monkeypatch.setattr(main_module, "FailoverManager", FakeFailover)
 
@@ -125,7 +144,10 @@ class TestSetConfig:
 
     def test_set_config_rejects_invalid_transport_mode(self, monkeypatch):
         config = self._mock_config()
-        monkeypatch.setattr(main_module, "_get_config", lambda: config)
+        monkeypatch.setattr(
+            main_module, "_RUNTIME",
+            Runtime(config=config, adapter=object(), failover=object(), sanitizer=object()),
+        )
 
         result = main_module.set_config(transport_mode="cli")
         payload = json.loads(result)
@@ -136,7 +158,10 @@ class TestSetConfig:
     def test_set_config_invalid_transport_mode_is_atomic(self, monkeypatch):
         config = self._mock_config()
         before_runtime = dict(config["runtime"])
-        monkeypatch.setattr(main_module, "_get_config", lambda: config)
+        monkeypatch.setattr(
+            main_module, "_RUNTIME",
+            Runtime(config=config, adapter=object(), failover=object(), sanitizer=object()),
+        )
 
         result = main_module.set_config(timeout_seconds=180.0, transport_mode="cli")
         payload = json.loads(result)

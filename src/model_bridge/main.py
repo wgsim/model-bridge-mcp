@@ -60,6 +60,7 @@ from model_bridge.core.ollama_resolver import (
     collect_runtime_resources as _collect_runtime_resources,
     safe_gb as _safe_gb,
 )
+from model_bridge.runtime import Runtime
 from model_bridge.security.sanitizer import SecuritySanitizer
 
 
@@ -77,10 +78,7 @@ _HEALTH_CHECK_TIMEOUT_SECONDS = 5
 
 mcp = FastMCP("Model Bridge MCP")
 
-CONFIG: Optional[dict] = None
-ADAPTER: Optional[BaseAdapter] = None
-FAILOVER: Optional[FailoverManager] = None
-SANITIZER: Optional[SecuritySanitizer] = None
+_RUNTIME: Optional[Runtime] = None
 PROMPT_CACHE: Optional[PromptCache] = None
 SESSION_MEMORY: Optional[SessionMemory] = None
 PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
@@ -105,12 +103,7 @@ def _get_model_bridge_version() -> str:
         return "unknown"
 
 
-def build_runtime(config: Optional[dict] = None) -> tuple[
-    dict,
-    BaseAdapter,
-    FailoverManager,
-    SecuritySanitizer,
-]:
+def build_runtime(config: Optional[dict] = None) -> Runtime:
     """Build runtime dependencies for production and tests."""
     resolved_config = config if config is not None else load_config()
     sanitizer = SecuritySanitizer(
@@ -125,43 +118,43 @@ def build_runtime(config: Optional[dict] = None) -> tuple[
         extra_env_vars=runtime_config.get("extra_env_vars"),
     )
     failover = FailoverManager(adapter=adapter, sanitizer=sanitizer, config=resolved_config)
-    return resolved_config, adapter, failover, sanitizer
+    return Runtime(
+        config=resolved_config,
+        adapter=adapter,
+        failover=failover,
+        sanitizer=sanitizer,
+    )
 
 
 def _ensure_runtime() -> None:
-    global CONFIG, ADAPTER, FAILOVER, SANITIZER
-    if (
-        CONFIG is not None
-        and ADAPTER is not None
-        and FAILOVER is not None
-        and SANITIZER is not None
-    ):
+    global _RUNTIME
+    if _RUNTIME is not None:
         return
-    CONFIG, ADAPTER, FAILOVER, SANITIZER = build_runtime()
+    _RUNTIME = build_runtime()
 
 
 def _get_config() -> dict:
     _ensure_runtime()
-    assert CONFIG is not None
-    return CONFIG
+    assert _RUNTIME is not None
+    return _RUNTIME.config
 
 
 def _get_adapter() -> BaseAdapter:
     _ensure_runtime()
-    assert ADAPTER is not None
-    return ADAPTER
+    assert _RUNTIME is not None
+    return _RUNTIME.adapter
 
 
 def _get_failover() -> FailoverManager:
     _ensure_runtime()
-    assert FAILOVER is not None
-    return FAILOVER
+    assert _RUNTIME is not None
+    return _RUNTIME.failover
 
 
 def _get_sanitizer() -> SecuritySanitizer:
     _ensure_runtime()
-    assert SANITIZER is not None
-    return SANITIZER
+    assert _RUNTIME is not None
+    return _RUNTIME.sanitizer
 
 
 def _get_runtime_defaults() -> dict:
@@ -1540,8 +1533,9 @@ def set_config(
     Returns:
         JSON with the new effective configuration values.
     """
-    global CONFIG, ADAPTER, FAILOVER
-    config = _get_config()
+    _ensure_runtime()
+    assert _RUNTIME is not None
+    config = _RUNTIME.config
     runtime = config.get("runtime", {})
     changes = {}
 
@@ -1568,11 +1562,15 @@ def set_config(
     if normalized_mode is not None:
         runtime["transport_mode"] = normalized_mode
         changes["transport_mode"] = normalized_mode
-        ADAPTER = build_adapter(config, env=os.environ.copy())
-        FAILOVER = FailoverManager(adapter=ADAPTER, sanitizer=_get_sanitizer(), config=config)
+        _RUNTIME.adapter = build_adapter(config, env=os.environ.copy())
+        _RUNTIME.failover = FailoverManager(
+            adapter=_RUNTIME.adapter,
+            sanitizer=_RUNTIME.sanitizer,
+            config=config,
+        )
 
     if timeout_seconds is not None:
-        adapter = ADAPTER if normalized_mode is not None else _get_adapter()
+        adapter = _RUNTIME.adapter if normalized_mode is not None else _get_adapter()
         if hasattr(adapter, "timeout_seconds"):
             adapter.timeout_seconds = timeout_seconds
 
