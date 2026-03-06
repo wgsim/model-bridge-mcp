@@ -97,9 +97,19 @@ class TestSetConfig:
         class FakeAdapter:
             timeout_seconds = 120.0
 
+        class FakeSanitizer:
+            def inspect(self, prompt, mode="execution"):
+                return True, ""
+
+        fake_sanitizer = FakeSanitizer()
+        monkeypatch.setattr(main_module, "_get_sanitizer", lambda: fake_sanitizer)
+
+        captured = {}
+
         class FakeFailover:
             def __init__(self, adapter, sanitizer, config):  # pylint: disable=unused-argument
                 self.adapter = adapter
+                captured["sanitizer"] = sanitizer
 
         monkeypatch.setattr(main_module, "build_adapter", lambda cfg, env=None: FakeAdapter())
         monkeypatch.setattr(main_module, "FailoverManager", FakeFailover)
@@ -111,6 +121,7 @@ class TestSetConfig:
         assert payload["changes"]["transport_mode"] == "sdk"
         assert payload["effective"]["transport_mode"] == "sdk"
         assert config["runtime"]["transport_mode"] == "sdk"
+        assert captured["sanitizer"] is fake_sanitizer, "sanitizer must be an instance, not a class"
 
     def test_set_config_rejects_invalid_transport_mode(self, monkeypatch):
         config = self._mock_config()
