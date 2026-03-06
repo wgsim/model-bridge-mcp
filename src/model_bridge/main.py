@@ -47,6 +47,19 @@ from model_bridge.core.response import (  # noqa: F401 – re-exported for back-
     save_to_file,
     _mark_cached_json_payload,
 )
+from model_bridge.core.ollama_resolver import (
+    resolve_ollama_model as _resolve_ollama_model_impl,
+    normalize_model_name as _normalize_model_name,
+    resolve_fallback_chain as _resolve_fallback_chain_impl,
+    select_auto_ollama_alias as _select_auto_ollama_alias_impl,
+    parse_ollama_list_output as _parse_ollama_list_output,
+    get_installed_ollama_models as _get_installed_ollama_models,
+    compute_ollama_batch_concurrency as _compute_ollama_batch_concurrency_impl,
+    detect_ram_bytes as _detect_ram_bytes,
+    detect_nvidia_vram_bytes as _detect_nvidia_vram_bytes,
+    collect_runtime_resources as _collect_runtime_resources,
+    safe_gb as _safe_gb,
+)
 from model_bridge.security.sanitizer import SecuritySanitizer
 
 
@@ -65,6 +78,14 @@ PROVIDER_REGISTRY: Optional[ProviderRegistry] = None
 PLUGIN_LOADER: Optional[PluginLoader] = None
 TASK_TRACKER: TaskTracker = TaskTracker()
 _PACKAGE_NAME = "model-bridge-mcp"
+
+
+def _supports_kwarg(func: Callable, name: str) -> bool:
+    """Return True if *func* accepts the keyword argument *name* (explicitly or via **kwargs)."""
+    params = inspect.signature(func).parameters
+    return name in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
 
 
 def _get_model_bridge_version() -> str:
@@ -338,14 +359,7 @@ def _resolve_output_mode(output_mode: str | None) -> str:
 
 
 def _select_auto_ollama_alias(prompt: str) -> str:
-    runtime_cfg = _get_config().get("runtime", {})
-    short_threshold = runtime_cfg.get("auto_routing_short_prompt_threshold", 120)
-    low = prompt.lower()
-    if any(token in low for token in ("def ", "class ", "function", "python", "code", "bug", "stacktrace")):
-        return "coder"
-    if len(prompt.strip()) <= short_threshold:
-        return "fast"
-    return "default"
+    return _select_auto_ollama_alias_impl(prompt, config=_get_config())
 
 
 def _build_prompt_with_session(prompt: str, session_id: str | None) -> str:
@@ -400,177 +414,17 @@ def _remember_session_turn(session_id: str | None, prompt: str, response: str) -
 
 
 def _resolve_ollama_model(model_arg: str) -> tuple[str | None, str]:
-    models_cfg = _get_config()["models"]
-    aliases = models_cfg.get("ollama_aliases", {})
-    catalog = set(models_cfg.get("ollama_catalog", []))
-    token = (model_arg or "").strip()
-    if not token:
-        token = "default"
-
-    if token in aliases:
-        resolved = aliases[token]
-        return resolved, ""
-    if token in catalog:
-        return token, ""
-
-    alias_keys = ", ".join(sorted(aliases.keys()))
-    model_names = ", ".join(sorted(catalog))
-    return (
-        None,
-        (
-            f"[MODEL ERROR] Unknown ollama model/alias: '{token}'. "
-            f"Aliases: [{alias_keys}] | Models: [{model_names}]"
-        ),
-    )
-
-
-def _safe_gb(value_bytes: int | None) -> float | None:
-    if value_bytes is None:
-        return None
-    return round(value_bytes / (1024**3), 2)
-
-
-def _detect_ram_bytes() -> tuple[int | None, int | None]:
-    try:
-        page_size = int(os.sysconf("SC_PAGE_SIZE"))
-        total_pages = int(os.sysconf("SC_PHYS_PAGES"))
-        available_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
-        return page_size * total_pages, page_size * available_pages
-    except (ValueError, OSError, AttributeError):
-        return None, None
-
-
-def _detect_nvidia_vram_bytes() -> tuple[int | None, int | None]:
-    if not shutil.which("nvidia-smi"):
-        return None, None
-    try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.total,memory.free",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2,
-        )
-    except Exception:
-        return None, None
-    if result.returncode != 0:
-        return None, None
-    total_mib = 0
-    free_mib = 0
-    for line in result.stdout.splitlines():
-        parts = [part.strip() for part in line.split(",")]
-        if len(parts) != 2:
-            continue
-        try:
-            total_mib += int(parts[0])
-            free_mib += int(parts[1])
-        except ValueError:
-            continue
-    if total_mib <= 0:
-        return None, None
-    mib = 1024 * 1024
-    return total_mib * mib, free_mib * mib
-
-
-def _collect_runtime_resources() -> dict:
-    ram_total_bytes, ram_free_bytes = _detect_ram_bytes()
-    vram_total_bytes, vram_free_bytes = _detect_nvidia_vram_bytes()
-    return {
-        "ram_total_gb": _safe_gb(ram_total_bytes),
-        "ram_free_gb": _safe_gb(ram_free_bytes),
-        "vram_total_gb": _safe_gb(vram_total_bytes),
-        "vram_free_gb": _safe_gb(vram_free_bytes),
-        "vram_detector": "nvidia-smi" if vram_total_bytes is not None else "unavailable",
-    }
+    return _resolve_ollama_model_impl(model_arg, config=_get_config())
 
 
 def _compute_ollama_batch_concurrency(model: str, requested_max_concurrency: int) -> dict:
-    runtime_cfg = _get_config().get("runtime", {})
-    default_max = int(runtime_cfg.get("ollama_resource_guard_default_max_concurrency", 1))
-    hard_cap = int(runtime_cfg.get("ollama_resource_guard_hard_cap", 2))
-    guard_enabled = bool(runtime_cfg.get("ollama_resource_guard_enabled", True))
-    requested = max(1, int(requested_max_concurrency))
-    resolved_model, _ = _resolve_ollama_model(model)
-    if resolved_model is None:
-        resolved_model = _get_config()["models"]["ollama_default_model"]
-
-    if not guard_enabled:
-        applied = max(1, min(requested, hard_cap))
-        return {
-            "resolved_model": resolved_model,
-            "applied_max_concurrency": applied,
-            "reason": "resource_guard_disabled",
-            "resources": _collect_runtime_resources(),
-        }
-
-    resources = _collect_runtime_resources()
-    model_mem_map = runtime_cfg.get("ollama_model_memory_gb", {})
-    model_mem_gb = model_mem_map.get(resolved_model)
-    ram_free_gb = resources.get("ram_free_gb")
-    reserve_ram_gb = float(runtime_cfg.get("ollama_resource_guard_reserve_ram_gb", 2.0))
-    safety_factor = float(runtime_cfg.get("ollama_resource_guard_safety_factor", 0.6))
-
-    allowed = default_max
-    reason = "default_conservative_guard"
-
-    if model_mem_gb and ram_free_gb is not None:
-        usable_gb = max(0.0, float(ram_free_gb) - reserve_ram_gb)
-        if model_mem_gb > 0:
-            estimated = int((usable_gb * safety_factor) // float(model_mem_gb))
-            allowed = max(default_max, estimated)
-            reason = "resource_based_estimation"
-    elif ram_free_gb is None:
-        reason = "ram_unavailable_default_guard"
-    else:
-        reason = "model_profile_missing_default_guard"
-
-    allowed = max(1, min(allowed, hard_cap))
-    applied = max(1, min(requested, allowed))
-    return {
-        "resolved_model": resolved_model,
-        "applied_max_concurrency": applied,
-        "reason": reason,
-        "resources": resources,
-    }
+    return _compute_ollama_batch_concurrency_impl(model, requested_max_concurrency, config=_get_config())
 
 
-
-
-def _normalize_model_name(name: str) -> str:
-    value = name.strip()
-    while value.endswith(":latest"):
-        value = value[: -len(":latest")]
-    return value
 
 
 def _resolve_fallback_chain(requested_model: str) -> list[str]:
-    models_cfg = _get_config()["models"]
-    aliases = models_cfg["ollama_aliases"]
-    catalog = set(models_cfg["ollama_catalog"])
-    chain_tokens = models_cfg.get("ollama_local_fallback_chain", [])
-
-    ordered: list[str] = []
-    seen: set[str] = set()
-
-    def _add_token(token: str) -> None:
-        if token in aliases:
-            model_name = aliases[token]
-        elif token in catalog:
-            model_name = token
-        else:
-            return
-        if model_name not in seen:
-            seen.add(model_name)
-            ordered.append(model_name)
-
-    _add_token(requested_model)
-    for token in chain_tokens:
-        _add_token(token)
-    return ordered
+    return _resolve_fallback_chain_impl(requested_model, config=_get_config())
 
 
 def _select_provider_by_weight(chain_name: str) -> str | None:
@@ -617,13 +471,8 @@ async def _run_ollama_with_timeout(
 ) -> tuple[bool, str]:
     adapter = _get_adapter()
     run_async = adapter.run_async
-    params = inspect.signature(run_async).parameters
-    supports_timeout = "timeout_seconds" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_strip_noise = "strip_noise" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
+    supports_timeout = _supports_kwarg(run_async, "timeout_seconds")
+    supports_strip_noise = _supports_kwarg(run_async, "strip_noise")
     kwargs: dict[str, object] = {}
     if supports_timeout:
         kwargs["timeout_seconds"] = timeout_seconds
@@ -659,16 +508,9 @@ async def _execute_failover_with_timeout(
 
     failover = _get_failover()
     execute_async = failover.execute_async
-    params = inspect.signature(execute_async).parameters
-    supports_timeout = "timeout_seconds" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_provider_args = "provider_args" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
-    supports_output_mode = "output_mode" in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
+    supports_timeout = _supports_kwarg(execute_async, "timeout_seconds")
+    supports_provider_args = _supports_kwarg(execute_async, "provider_args")
+    supports_output_mode = _supports_kwarg(execute_async, "output_mode")
     kwargs: dict[str, object] = {}
     if supports_timeout:
         kwargs["timeout_seconds"] = timeout_seconds
@@ -747,35 +589,6 @@ def _build_provider_model_trials(provider: str, requested_model: str | None) -> 
 
 
 
-def _parse_ollama_list_output(output: str) -> list[str]:
-    names: list[str] = []
-    for raw_line in output.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.upper().startswith("NAME "):
-            continue
-        name = line.split()[0]
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def _get_installed_ollama_models() -> tuple[list[str], str]:
-    if not shutil.which("ollama"):
-        return [], "ollama command not found"
-    try:
-        proc = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception as exc:
-        return [], str(exc)
-    if proc.returncode != 0:
-        return [], (proc.stdout + proc.stderr).strip() or f"exit_code={proc.returncode}"
-    return _parse_ollama_list_output(proc.stdout), ""
 
 
 def _list_static_provider_models(provider_id: str) -> dict:
@@ -791,6 +604,58 @@ def _list_static_provider_models(provider_id: str) -> dict:
         "catalog_count": len(catalog),
         "command": commands_cfg.get(provider_id, {}).get("exec", []),
     }
+
+
+async def _ask_with_failover(
+    prompt: str,
+    *,
+    default_primary: str,
+    secondary: str,
+    mode: str,
+    tool_name: str,
+    weighted_chain_name: str | None,
+    save_path: str | None,
+    force_model: bool,
+    model: str | None,
+    timeout_seconds: float | None,
+    max_output_tokens: int | None,
+    response_format: str | None,
+    verbosity: str | None,
+    stream: bool | None,
+    output_mode: str,
+) -> str:
+    """Shared implementation for ask_chatgpt_cli, ask_gemini_cli, and ask_claude_code."""
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    )
+    normalized_output_mode = _normalize_output_mode(output_mode)
+
+    primary_provider = default_primary
+
+    response = ""
+    for trial_model in _build_provider_model_trials(primary_provider, model):
+        provider_args = (
+            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
+            if trial_model is not None
+            else None
+        )
+        response = await _execute_failover_with_timeout(
+            primary_provider,
+            secondary,
+            prompt,
+            mode,
+            force_primary=force_model,
+            allow_tertiary=True,
+            timeout_seconds=options["timeout_seconds"],
+            provider_args=provider_args,
+            output_mode=normalized_output_mode,
+        )
+        if not _is_task_execution_failed(response):
+            break
+        if not _is_model_selection_failure(response):
+            break
+    response = _save_if_requested(response, save_path, tool_name=tool_name)
+    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -823,39 +688,23 @@ async def ask_chatgpt_cli(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    return await _ask_with_failover(
+        prompt,
+        default_primary="codex",
+        secondary="gemini",
+        mode="execution",
+        tool_name="ask_chatgpt_cli",
+        weighted_chain_name="ask_chatgpt_cli",
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
     )
-    normalized_output_mode = _normalize_output_mode(output_mode)
-
-    # Keep primary aligned with function identity: ask_chatgpt_cli => codex.
-    primary_provider = "codex"
-    secondary_provider = "gemini"
-
-    response = ""
-    for trial_model in _build_provider_model_trials(primary_provider, model):
-        provider_args = (
-            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            primary_provider,
-            secondary_provider,
-            prompt,
-            "execution",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_chatgpt_cli")
-    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -888,39 +737,23 @@ async def ask_gemini_cli(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    return await _ask_with_failover(
+        prompt,
+        default_primary="gemini",
+        secondary="codex",
+        mode="analysis",
+        tool_name="ask_gemini_cli",
+        weighted_chain_name="ask_gemini_cli",
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
     )
-    normalized_output_mode = _normalize_output_mode(output_mode)
-
-    # Keep primary aligned with function identity: ask_gemini_cli => gemini.
-    primary_provider = "gemini"
-    secondary_provider = "codex"
-
-    response = ""
-    for trial_model in _build_provider_model_trials(primary_provider, model):
-        provider_args = (
-            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            primary_provider,
-            secondary_provider,
-            prompt,
-            "analysis",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_gemini_cli")
-    return _finalize_response(response, primary_provider, options)
 
 
 @mcp.tool()
@@ -1053,41 +886,33 @@ async def ask_claude_code(
     Returns:
         Provider response text with routing metadata appended.
     """
-    options = _normalize_ask_options(
-        timeout_seconds, max_output_tokens, response_format, verbosity, stream
-    )
-    normalized_output_mode = _normalize_output_mode(output_mode)
     if not _is_provider_configured("claude_code"):
+        options = _normalize_ask_options(
+            timeout_seconds, max_output_tokens, response_format, verbosity, stream
+        )
         return _finalize_response(
             "[PROVIDER ERROR] 'claude_code' is not configured in commands. "
             "Add commands.claude_code.exec/health in config to enable it.",
             "claude_code",
             options,
         )
-    response = ""
-    for trial_model in _build_provider_model_trials("claude_code", model):
-        provider_args = (
-            {"claude_code": _build_provider_model_args("claude_code", trial_model)}
-            if trial_model is not None
-            else None
-        )
-        response = await _execute_failover_with_timeout(
-            "claude_code",
-            "codex",
-            prompt,
-            "analysis",
-            force_primary=force_model,
-            allow_tertiary=True,
-            timeout_seconds=options["timeout_seconds"],
-            provider_args=provider_args,
-            output_mode=normalized_output_mode,
-        )
-        if not _is_task_execution_failed(response):
-            break
-        if not _is_model_selection_failure(response):
-            break
-    response = _save_if_requested(response, save_path, tool_name="ask_claude_code")
-    return _finalize_response(response, "claude_code", options)
+    return await _ask_with_failover(
+        prompt,
+        default_primary="claude_code",
+        secondary="codex",
+        mode="analysis",
+        tool_name="ask_claude_code",
+        weighted_chain_name=None,
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
+    )
 
 
 @mcp.tool()
