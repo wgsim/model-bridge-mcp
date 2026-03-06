@@ -1569,7 +1569,7 @@ def set_config(
         runtime["transport_mode"] = normalized_mode
         changes["transport_mode"] = normalized_mode
         ADAPTER = build_adapter(config, env=os.environ.copy())
-        FAILOVER = FailoverManager(adapter=ADAPTER, sanitizer=SecuritySanitizer, config=config)
+        FAILOVER = FailoverManager(adapter=ADAPTER, sanitizer=_get_sanitizer(), config=config)
 
     if timeout_seconds is not None:
         adapter = ADAPTER if normalized_mode is not None else _get_adapter()
