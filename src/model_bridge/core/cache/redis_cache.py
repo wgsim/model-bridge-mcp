@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 from typing import Any
+
+from model_bridge.core.cache.backend import build_key as _build_key
 
 logger = logging.getLogger("model_bridge.cache.redis")
 
@@ -65,8 +66,7 @@ class RedisCache:
     @staticmethod
     def build_key(payload: dict[str, Any]) -> str:
         """Build a cache key from a payload dict."""
-        raw = repr(sorted(payload.items())).encode("utf-8")
-        return hashlib.sha256(raw).hexdigest()
+        return _build_key(payload)
 
     def _full_key(self, key: str) -> str:
         """Add prefix to key."""
