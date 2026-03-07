@@ -7,6 +7,7 @@ import pytest
 
 from model_bridge import main as main_module
 from model_bridge.adapters.sdk_adapter import SDKAdapter
+from model_bridge.runtime import Runtime
 
 
 @pytest.fixture
@@ -90,13 +91,15 @@ def test_runtime_is_initialized_lazily_once(monkeypatch):
 
     def _fake_build_runtime(config=None):
         calls["count"] += 1
-        return fake_config, _Adapter(), _Failover(), _Sanitizer()
+        return Runtime(
+            config=fake_config,
+            adapter=_Adapter(),
+            failover=_Failover(),
+            sanitizer=_Sanitizer(),
+        )
 
     monkeypatch.setattr(main_module, "build_runtime", _fake_build_runtime)
-    monkeypatch.setattr(main_module, "CONFIG", None)
-    monkeypatch.setattr(main_module, "ADAPTER", None)
-    monkeypatch.setattr(main_module, "FAILOVER", None)
-    monkeypatch.setattr(main_module, "SANITIZER", None)
+    monkeypatch.setattr(main_module, "_RUNTIME", None)
 
     assert main_module._get_config() is fake_config
     assert isinstance(main_module._get_adapter(), _Adapter)
@@ -117,17 +120,29 @@ def test_runtime_rebuilds_when_sanitizer_missing(monkeypatch):
     class _Sanitizer:
         pass
 
+    complete_runtime = Runtime(
+        config=fake_config,
+        adapter=_Adapter(),
+        failover=_Failover(),
+        sanitizer=_Sanitizer(),
+    )
+
     def _fake_build_runtime(config=None):
         calls["count"] += 1
-        return fake_config, _Adapter(), _Failover(), _Sanitizer()
+        return complete_runtime
 
+    # Pre-populate a partial runtime with sanitizer=None to trigger rebuild
+    partial_runtime = Runtime(
+        config=fake_config,
+        adapter=_Adapter(),
+        failover=_Failover(),
+        sanitizer=None,
+    )
     monkeypatch.setattr(main_module, "build_runtime", _fake_build_runtime)
-    monkeypatch.setattr(main_module, "CONFIG", fake_config)
-    monkeypatch.setattr(main_module, "ADAPTER", _Adapter())
-    monkeypatch.setattr(main_module, "FAILOVER", _Failover())
-    monkeypatch.setattr(main_module, "SANITIZER", None)
+    monkeypatch.setattr(main_module, "_RUNTIME", partial_runtime)
 
-    assert isinstance(main_module._get_sanitizer(), _Sanitizer)
+    result = main_module._get_sanitizer()
+    assert result is complete_runtime.sanitizer
     assert calls["count"] == 1
 
 
@@ -162,9 +177,9 @@ def test_build_runtime_uses_sdk_adapter_when_transport_mode_sdk():
         },
     }
 
-    _, adapter, _, _ = main_module.build_runtime(config=config)
+    rt = main_module.build_runtime(config=config)
 
-    assert isinstance(adapter, SDKAdapter)
+    assert isinstance(rt.adapter, SDKAdapter)
 
 
 def test_build_runtime_forwards_extra_path_and_env_vars_to_factory(monkeypatch):
@@ -206,9 +221,9 @@ def test_build_runtime_forwards_extra_path_and_env_vars_to_factory(monkeypatch):
         "routing": {"default_chains": {}},
     }
 
-    _, adapter, _, _ = main_module.build_runtime(config=config)
+    rt = main_module.build_runtime(config=config)
 
-    assert isinstance(adapter, FakeAdapter)
+    assert isinstance(rt.adapter, FakeAdapter)
     assert isinstance(captured["env"], dict)
     assert captured["extra_path"] == ["/opt/custom/bin"]
     assert captured["extra_env_vars"] == {"GOOGLE_CLOUD_PROJECT": "demo-project"}
