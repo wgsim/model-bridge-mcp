@@ -120,20 +120,29 @@ def test_runtime_rebuilds_when_sanitizer_missing(monkeypatch):
     class _Sanitizer:
         pass
 
+    complete_runtime = Runtime(
+        config=fake_config,
+        adapter=_Adapter(),
+        failover=_Failover(),
+        sanitizer=_Sanitizer(),
+    )
+
     def _fake_build_runtime(config=None):
         calls["count"] += 1
-        return Runtime(
-            config=fake_config,
-            adapter=_Adapter(),
-            failover=_Failover(),
-            sanitizer=_Sanitizer(),
-        )
+        return complete_runtime
 
-    # Pre-populate a partial runtime missing .sanitizer to trigger rebuild
+    # Pre-populate a partial runtime with sanitizer=None to trigger rebuild
+    partial_runtime = Runtime(
+        config=fake_config,
+        adapter=_Adapter(),
+        failover=_Failover(),
+        sanitizer=None,
+    )
     monkeypatch.setattr(main_module, "build_runtime", _fake_build_runtime)
-    monkeypatch.setattr(main_module, "_RUNTIME", None)
+    monkeypatch.setattr(main_module, "_RUNTIME", partial_runtime)
 
-    assert isinstance(main_module._get_sanitizer(), _Sanitizer)
+    result = main_module._get_sanitizer()
+    assert result is complete_runtime.sanitizer
     assert calls["count"] == 1
 
 

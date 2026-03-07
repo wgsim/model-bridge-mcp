@@ -114,7 +114,6 @@ class TestSetConfig:
                 return True, ""
 
         fake_sanitizer = FakeSanitizer()
-        monkeypatch.setattr(main_module, "_get_sanitizer", lambda: fake_sanitizer)
 
         captured = {}
 
@@ -123,12 +122,9 @@ class TestSetConfig:
                 self.adapter = adapter
                 captured["sanitizer"] = sanitizer
 
-        class FakeSanitizer:
-            pass
-
         monkeypatch.setattr(
             main_module, "_RUNTIME",
-            Runtime(config=config, adapter=FakeAdapter(), failover=object(), sanitizer=FakeSanitizer()),
+            Runtime(config=config, adapter=FakeAdapter(), failover=object(), sanitizer=fake_sanitizer),
         )
         monkeypatch.setattr(main_module, "build_adapter", lambda cfg, env=None: FakeAdapter())
         monkeypatch.setattr(main_module, "FailoverManager", FakeFailover)

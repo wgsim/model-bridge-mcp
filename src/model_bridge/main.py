@@ -128,7 +128,13 @@ def build_runtime(config: Optional[dict] = None) -> Runtime:
 
 def _ensure_runtime() -> None:
     global _RUNTIME
-    if _RUNTIME is not None:
+    if (
+        _RUNTIME is not None
+        and _RUNTIME.config is not None
+        and _RUNTIME.adapter is not None
+        and _RUNTIME.failover is not None
+        and _RUNTIME.sanitizer is not None
+    ):
         return
     _RUNTIME = build_runtime()
 
