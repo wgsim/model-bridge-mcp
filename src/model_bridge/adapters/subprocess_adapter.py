@@ -18,6 +18,7 @@ from model_bridge.core.claude_capabilities import (
     normalize_claude_reasoning_effort,
 )
 from model_bridge.core.codex_capabilities import normalize_codex_reasoning_effort
+from model_bridge.core.gemini_capabilities import normalize_gemini_reasoning_effort
 
 logger = logging.getLogger("model_bridge.subprocess_adapter")
 
@@ -432,6 +433,9 @@ class SubprocessAdapter(CLIAdapter):
         model_name: str,
         reasoning_effort: str,
     ) -> tuple[str, str]:
+        if service_name == "gemini":
+            normalize_gemini_reasoning_effort(reasoning_effort)
+            return "unsupported", "Gemini reasoning_effort is sdk-only in this MCP."
         if service_name != "claude_code":
             return "unknown", ""
         normalized_effort = normalize_claude_reasoning_effort(reasoning_effort)
@@ -523,6 +527,10 @@ class SubprocessAdapter(CLIAdapter):
             ok, err, rewritten_args = self._rewrite_codex_args(rewritten_args)
             if not ok:
                 return False, err, [], ""
+        elif service_name == "gemini":
+            ok, err, rewritten_args = self._rewrite_gemini_args(rewritten_args)
+            if not ok:
+                return False, err, [], ""
         elif service_name == "claude_code":
             ok, err, rewritten_args = self._rewrite_claude_args(rewritten_args)
             if not ok:
@@ -562,6 +570,17 @@ class SubprocessAdapter(CLIAdapter):
             rewritten.extend(["-c", f'model_reasoning_effort="{effort}"'])
             idx += 2
         return True, "", rewritten
+
+    @staticmethod
+    def _rewrite_gemini_args(args: Sequence[str]) -> tuple[bool, str, list[str]]:
+        args_list = list(args)
+        if "--reasoning-effort" not in args_list:
+            return True, "", args_list
+        idx = args_list.index("--reasoning-effort")
+        if idx + 1 >= len(args_list):
+            return False, "Configuration Error: Missing value for --reasoning-effort", []
+        normalize_gemini_reasoning_effort(args_list[idx + 1])
+        return False, "[MODEL ERROR] Gemini reasoning_effort is sdk-only in this MCP.", []
 
     @staticmethod
     def _rewrite_claude_args(args: Sequence[str]) -> tuple[bool, str, list[str]]:

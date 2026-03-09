@@ -34,6 +34,10 @@ from model_bridge.core.codex_capabilities import (
     normalize_codex_reasoning_effort,
     validate_codex_reasoning_effort,
 )
+from model_bridge.core.gemini_capabilities import (
+    normalize_gemini_reasoning_effort,
+    validate_gemini_reasoning_effort,
+)
 from model_bridge.core.failover_manager import FailoverManager, get_last_errors as _get_last_errors_from_buffer
 from model_bridge.core.plugin_loader import PluginLoader
 from model_bridge.core.provider_registry import ProviderRegistry, build_default_provider_registry
@@ -313,7 +317,7 @@ async def _dispatch_ask_provider(
             model=model,
             **common_kwargs,
         )
-    if provider_id in {"codex", "claude_code"}:
+    if provider_id in {"codex", "claude_code", "gemini"}:
         return await handler(
             prompt,
             model=model,
@@ -575,6 +579,8 @@ def _normalize_provider_reasoning_effort(
         return normalize_codex_reasoning_effort(reasoning_effort)
     if provider == "claude_code":
         return normalize_claude_reasoning_effort(reasoning_effort)
+    if provider == "gemini":
+        return normalize_gemini_reasoning_effort(reasoning_effort)
     token = (reasoning_effort or "").strip()
     if token:
         raise ValueError(f"reasoning_effort is not supported for provider='{provider}'")
@@ -590,6 +596,8 @@ def _validate_provider_reasoning_effort(
         return validate_codex_reasoning_effort(model_name, reasoning_effort)
     if provider == "claude_code":
         return validate_claude_reasoning_effort(model_name, reasoning_effort)
+    if provider == "gemini":
+        return validate_gemini_reasoning_effort(model_name, reasoning_effort)
     return _normalize_provider_reasoning_effort(provider, reasoning_effort)
 
 
@@ -639,7 +647,7 @@ def _build_provider_args(
     args: list[str] = []
     if model and provider in {"codex", "gemini", "claude_code"}:
         args.extend(["--model", model])
-    if provider in {"codex", "claude_code"}:
+    if provider in {"codex", "claude_code", "gemini"}:
         normalized_effort = _normalize_provider_reasoning_effort(provider, reasoning_effort)
         if normalized_effort:
             args.extend(["--reasoning-effort", normalized_effort])
@@ -675,9 +683,9 @@ def _build_provider_model_trials(
     trials: list[str | None] = []
     normalized_effort = _normalize_provider_reasoning_effort(provider, reasoning_effort)
     if explicit:
-        if provider in {"codex", "claude_code"}:
+        if provider in {"codex", "claude_code", "gemini"}:
             _validate_provider_reasoning_effort(provider, explicit, normalized_effort)
-            if provider == "claude_code" and normalized_effort is not None:
+            if provider in {"claude_code", "gemini"} and normalized_effort is not None:
                 probe_status, probe_message = _probe_provider_reasoning_effort(
                     provider,
                     explicit,
@@ -715,6 +723,32 @@ def _build_provider_model_trials(
             if not compatible:
                 rejection_suffix = ""
                 if provider == "claude_code" and runtime_rejections:
+                    rejection_suffix = f" Runtime probe rejected: {'; '.join(runtime_rejections)}"
+                raise ValueError(
+                    f"No configured {provider} models support reasoning_effort='{normalized_effort}'."
+                    f"{rejection_suffix}"
+                )
+            trials.extend(compatible)
+        elif provider == "gemini" and normalized_effort is not None:
+            compatible: list[str] = []
+            runtime_rejections: list[str] = []
+            for item in catalog:
+                token = (item or "").strip()
+                if not token:
+                    continue
+                _validate_provider_reasoning_effort(provider, token, normalized_effort)
+                probe_status, probe_message = _probe_provider_reasoning_effort(
+                    provider,
+                    token,
+                    normalized_effort,
+                )
+                if probe_status == "unsupported":
+                    runtime_rejections.append(f"{token}: {probe_message}".strip())
+                    continue
+                compatible.append(token)
+            if not compatible:
+                rejection_suffix = ""
+                if runtime_rejections:
                     rejection_suffix = f" Runtime probe rejected: {'; '.join(runtime_rejections)}"
                 raise ValueError(
                     f"No configured {provider} models support reasoning_effort='{normalized_effort}'."
@@ -873,6 +907,7 @@ async def ask_gemini_cli(
     save_path: str = None,
     force_model: bool = False,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     timeout_seconds: float | None = None,
     max_output_tokens: int | None = None,
     response_format: str | None = None,
@@ -887,6 +922,7 @@ async def ask_gemini_cli(
         save_path: Optional file path to save the response.
         force_model: If True, skip failover and only use the primary provider.
         model: Model name override (e.g. 'gemini-2.5-pro'). None uses config default.
+        reasoning_effort: Gemini sdk-only reasoning effort override for Gemini 3.x models.
         timeout_seconds: Per-call timeout in seconds. Default from config (~120s).
         max_output_tokens: Limit response tokens (provider-dependent).
         response_format: 'json' for JSON output, None for plain text.
@@ -907,7 +943,7 @@ async def ask_gemini_cli(
         save_path=save_path,
         force_model=force_model,
         model=model,
-        reasoning_effort=None,
+        reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
         max_output_tokens=max_output_tokens,
         response_format=response_format,

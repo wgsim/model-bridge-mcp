@@ -296,6 +296,22 @@ def test_run_places_gemini_prompt_before_model_flag_args():
     assert run_mock.call_args.kwargs["input"] == ""
 
 
+def test_run_rejects_reasoning_effort_for_gemini_subprocess():
+    adapter = SubprocessAdapter(
+        {"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}},
+        system_suffix=" [suffix]",
+    )
+
+    ok, output = adapter.run(
+        "gemini",
+        ["--model", "gemini-3.1-pro-preview", "--reasoning-effort", "high"],
+        "hello",
+    )
+
+    assert ok is False
+    assert "sdk-only" in output
+
+
 def test_run_rewrites_codex_reasoning_effort_to_config_override():
     adapter = SubprocessAdapter(
         {"codex": {"exec": ["codex", "exec", "--skip-git-repo-check"], "health": ["codex", "--version"]}},

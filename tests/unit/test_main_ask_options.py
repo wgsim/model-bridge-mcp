@@ -271,6 +271,65 @@ def test_ask_gemini_cli_passes_model_override_to_primary_provider(monkeypatch):
     assert fake_failover.last["provider_args"] == {"gemini": ["--model", "gemini-2.5-pro"]}
 
 
+def test_ask_gemini_cli_passes_reasoning_effort_to_primary_provider(monkeypatch):
+    fake_failover = _CaptureProviderArgsFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: None)
+
+    class FakeSdkAdapter:
+        def preflight_check(self, provider):
+            return True, ""
+
+        def probe_reasoning_effort(self, service_name, model_name, reasoning_effort):
+            return "supported", "ok"
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeSdkAdapter())
+
+    out = asyncio.run(
+        main_module.ask_gemini_cli(
+            "hi",
+            model="gemini-3.1-pro-preview",
+            reasoning_effort="high",
+        )
+    )
+
+    assert out == "ok"
+    assert fake_failover.last["provider_args"] == {
+        "gemini": ["--model", "gemini-3.1-pro-preview", "--reasoning-effort", "high"]
+    }
+
+
+def test_ask_gemini_cli_rejects_reasoning_effort_for_gemini_2_5():
+    with pytest.raises(ValueError, match="does not support reasoning_effort"):
+        asyncio.run(
+            main_module.ask_gemini_cli(
+                "hi",
+                model="gemini-2.5-pro",
+                reasoning_effort="high",
+            )
+        )
+
+
+def test_ask_gemini_cli_rejects_reasoning_effort_for_subprocess_transport(monkeypatch):
+    class FakeSubprocessAdapter:
+        def preflight_check(self, provider):
+            return True, ""
+
+        def probe_reasoning_effort(self, service_name, model_name, reasoning_effort):
+            return "unsupported", "Gemini reasoning_effort is sdk-only in this MCP."
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeSubprocessAdapter())
+
+    with pytest.raises(ValueError, match="sdk-only"):
+        asyncio.run(
+            main_module.ask_gemini_cli(
+                "hi",
+                model="gemini-3.1-pro-preview",
+                reasoning_effort="high",
+            )
+        )
+
+
 def test_ask_gemini_cli_keeps_gemini_primary_even_if_weighted_selector_differs(monkeypatch):
     fake_failover = _CaptureProviderArgsFailover()
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
@@ -495,3 +554,33 @@ def test_ask_unified_claude_passes_reasoning_effort(monkeypatch):
     assert captured["provider_id"] == "claude_code"
     assert captured["kwargs"]["model"] == "sonnet"
     assert captured["kwargs"]["reasoning_effort"] == "medium"
+
+
+def test_ask_unified_gemini_passes_reasoning_effort(monkeypatch):
+    captured = {}
+
+    async def _fake_dispatch(provider_id, prompt, **kwargs):
+        captured["provider_id"] = provider_id
+        captured["kwargs"] = kwargs
+        return "ok"
+
+    class FakeSdkAdapter:
+        def probe_reasoning_effort(self, service_name, model_name, reasoning_effort):
+            return "supported", "ok"
+
+    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeSdkAdapter())
+
+    out = asyncio.run(
+        main_module.ask(
+            "hi",
+            provider="gemini",
+            model="gemini-3.1-pro-preview",
+            reasoning_effort="high",
+        )
+    )
+
+    assert out == "ok"
+    assert captured["provider_id"] == "gemini"
+    assert captured["kwargs"]["model"] == "gemini-3.1-pro-preview"
+    assert captured["kwargs"]["reasoning_effort"] == "high"

@@ -23,6 +23,11 @@ from model_bridge.core.codex_capabilities import (
     DEFAULT_CODEX_MODEL,
     normalize_codex_reasoning_effort,
 )
+from model_bridge.core.gemini_capabilities import (
+    get_gemini_thinking_level,
+    normalize_gemini_reasoning_effort,
+    validate_gemini_reasoning_effort,
+)
 
 
 class SDKAdapter(CLIAdapter):
@@ -408,6 +413,9 @@ class SDKAdapter(CLIAdapter):
         model_name: str,
         reasoning_effort: str,
     ) -> tuple[str, str]:
+        if service_name == "gemini":
+            validate_gemini_reasoning_effort(model_name, reasoning_effort)
+            return "supported", "ok"
         if service_name != "claude_code":
             return "unknown", ""
         normalized_effort = normalize_claude_reasoning_effort(reasoning_effort)
@@ -467,6 +475,15 @@ class SDKAdapter(CLIAdapter):
                 if token:
                     return token
         return "gemini-2.5-flash"
+
+    def _resolve_gemini_reasoning_effort(self, args: Sequence[str]) -> str | None:
+        args_list = list(args)
+        if "--reasoning-effort" not in args_list:
+            return None
+        idx = args_list.index("--reasoning-effort")
+        if idx + 1 >= len(args_list):
+            raise ValueError("Missing value for --reasoning-effort")
+        return normalize_gemini_reasoning_effort(args_list[idx + 1])
 
     def _resolve_claude_model(self, args: Sequence[str]) -> str:
         token = self._resolve_model("claude_code", args)
@@ -858,6 +875,9 @@ class SDKAdapter(CLIAdapter):
                 "[SDK AUTH ERROR] Missing GEMINI_API_KEY/GOOGLE_API_KEY or GEMINI/GOOGLE OAuth access token.",
             )
         model_name = self._resolve_gemini_model(args)
+        reasoning_effort = self._resolve_gemini_reasoning_effort(args)
+        if reasoning_effort:
+            validate_gemini_reasoning_effort(model_name, reasoning_effort)
         payload = {
             "contents": [
                 {
@@ -866,6 +886,12 @@ class SDKAdapter(CLIAdapter):
                 }
             ]
         }
+        if reasoning_effort:
+            payload["generationConfig"] = {
+                "thinkingConfig": {
+                    "thinkingLevel": get_gemini_thinking_level(reasoning_effort),
+                }
+            }
         # api_key path is preferred; if empty, _post_gemini_json uses OAuth bearer token.
         ok, raw = await asyncio.to_thread(
             self._post_gemini_json,

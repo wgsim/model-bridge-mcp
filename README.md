@@ -179,10 +179,13 @@ You can use the new unified tool:
   - no explicit `model` => try provider catalog models in order, then retry once without `--model`
 - `reasoning_effort` is currently supported for:
   - `codex`
+  - `gemini` (sdk transport only)
   - `claude_code`
 - Provider-specific transport mapping:
   - `codex` sdk => `payload.reasoning.effort`
   - `codex` subprocess => `codex exec -c model_reasoning_effort="..."`
+  - `gemini` sdk => `generationConfig.thinkingConfig.thinkingLevel`
+  - `gemini` subprocess => unsupported in this MCP
   - `claude_code` sdk => `output_config.effort` plus `thinking={"type":"adaptive"}` for Claude 4.6 aliases
   - `claude_code` subprocess => `claude --effort <level>`
 - Claude effort handling also uses a transport-specific runtime probe:
@@ -323,9 +326,14 @@ Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code")` to in
 - Each non-ollama provider includes `model_flag="--model"`, `default_model`, and configured command metadata.
 - Current default catalogs:
   - `codex`: `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.1-codex-mini`
-  - `gemini`: `gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3-pro-preview`
+  - `gemini`: `gemini-3.1-pro-preview`, `gemini-3-flash-preview`, `gemini-2.5-pro`, `gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-3-pro-preview`
   - `claude_code`: `haiku`, `sonnet`, `opus`
 - Codex `default_model` is the first catalog entry, currently `gpt-5.4`.
+- Gemini `default_model` is the first catalog entry, currently `gemini-3.1-pro-preview`.
+- Gemini `reasoning_effort` guardrails are model-specific:
+  - `gemini-3.1-pro-preview`, `gemini-3-pro-preview`: `low`, `high`
+  - `gemini-3-flash-preview`: `minimal`, `low`, `medium`, `high`
+  - `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`: disabled in this MCP
 - Codex `reasoning_effort` guardrails are model-specific:
   - `gpt-5.4`: `none`, `low`, `medium`, `high`, `xhigh`
   - `gpt-5.3-codex`, `gpt-5.2-codex`: `low`, `medium`, `high`, `xhigh`
@@ -417,6 +425,6 @@ Integration smoke coverage:
   - `src/model_bridge/main.py`
 - Existing tool signatures are preserved:
   - `ask_chatgpt_cli(prompt, save_path=None, force_model=False, model=None, reasoning_effort=None)`
-  - `ask_gemini_cli(prompt, save_path=None, force_model=False, model=None)`
+  - `ask_gemini_cli(prompt, save_path=None, force_model=False, model=None, reasoning_effort=None)`
   - `ask_claude_code(prompt, save_path=None, force_model=False, model=None, reasoning_effort=None)`
   - `ask_ollama(prompt, save_path=None, model=\"default\")`

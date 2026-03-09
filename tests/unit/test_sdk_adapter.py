@@ -4,13 +4,21 @@ import os
 import stat
 import time
 
+import pytest
+
 from model_bridge.adapters.sdk_adapter import SDKAdapter
 
 
 def _models_config() -> dict:
     return {
         "codex_model_catalog": ["gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"],
-        "gemini_model_catalog": ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"],
+        "gemini_model_catalog": [
+            "gemini-3.1-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+        ],
         "claude_code_model_catalog": ["haiku", "sonnet", "opus"],
         "ollama_default_model": "gpt-oss:20b",
         "ollama_aliases": {"default": "gpt-oss:20b"},
@@ -280,6 +288,70 @@ def test_run_async_gemini_posts_payload_and_parses_candidates(monkeypatch):
     assert captured["api_key"] == "gm-test"
     assert captured["payload"]["contents"][0]["parts"][0]["text"] == "hello [suffix]"
     assert captured["timeout_seconds"] == 33.0
+
+
+def test_run_async_gemini_defaults_to_gemini_3_1_pro_preview_from_catalog(monkeypatch):
+    captured = {}
+    adapter = SDKAdapter(
+        models_config=_models_config(),
+        env={"GEMINI_API_KEY": "gm-test"},
+    )
+
+    def _fake_post(model, api_key, payload, timeout_seconds):
+        captured["model"] = model
+        captured["payload"] = payload
+        return True, {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    monkeypatch.setattr(adapter, "_post_gemini_json", _fake_post)
+
+    ok, output = asyncio.run(adapter.run_async("gemini", [], "hello"))
+
+    assert ok is True
+    assert output == "ok"
+    assert captured["model"] == "gemini-3.1-pro-preview"
+
+
+def test_run_async_gemini_adds_thinking_level_for_gemini_3_1(monkeypatch):
+    captured = {}
+    adapter = SDKAdapter(
+        models_config=_models_config(),
+        env={"GEMINI_API_KEY": "gm-test"},
+    )
+
+    def _fake_post(model, api_key, payload, timeout_seconds):
+        captured["model"] = model
+        captured["payload"] = payload
+        return True, {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    monkeypatch.setattr(adapter, "_post_gemini_json", _fake_post)
+
+    ok, output = asyncio.run(
+        adapter.run_async(
+            "gemini",
+            ["--model", "gemini-3.1-pro-preview", "--reasoning-effort", "high"],
+            "hello",
+        )
+    )
+
+    assert ok is True
+    assert output == "ok"
+    assert captured["payload"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "HIGH"}
+
+
+def test_run_async_gemini_rejects_reasoning_effort_for_gemini_2_5():
+    adapter = SDKAdapter(
+        models_config=_models_config(),
+        env={"GEMINI_API_KEY": "gm-test"},
+    )
+
+    with pytest.raises(ValueError, match="does not support reasoning_effort"):
+        asyncio.run(
+            adapter.run_async(
+                "gemini",
+                ["--model", "gemini-2.5-pro", "--reasoning-effort", "high"],
+                "hello",
+            )
+        )
 
 
 def test_run_async_gemini_returns_auth_error_without_key():
