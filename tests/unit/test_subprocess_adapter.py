@@ -302,11 +302,12 @@ def test_run_rejects_reasoning_effort_for_gemini_subprocess():
         system_suffix=" [suffix]",
     )
 
-    ok, output = adapter.run(
-        "gemini",
-        ["--model", "gemini-3.1-pro-preview", "--reasoning-effort", "high"],
-        "hello",
-    )
+    with patch("shutil.which", return_value="/usr/bin/gemini"):
+        ok, output = adapter.run(
+            "gemini",
+            ["--model", "gemini-3.1-pro-preview", "--reasoning-effort", "high"],
+            "hello",
+        )
 
     assert ok is False
     assert "sdk-only" in output
