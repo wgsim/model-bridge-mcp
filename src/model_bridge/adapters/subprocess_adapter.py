@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Mapping, Sequence, Tuple
 
 from .base import CLIAdapter
+from model_bridge.core.claude_capabilities import (
+    is_claude_effort_unsupported_message,
+    normalize_claude_reasoning_effort,
+)
 from model_bridge.core.codex_capabilities import normalize_codex_reasoning_effort
 
 logger = logging.getLogger("model_bridge.subprocess_adapter")
@@ -324,6 +328,7 @@ class SubprocessAdapter(CLIAdapter):
         self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
         self.timeout_seconds = timeout_seconds
         self._preflight_cache: dict[str, tuple[bool, str, float]] = {}
+        self._reasoning_probe_cache: dict[tuple[str, str, str], tuple[str, str, float]] = {}
         self._extra_path = list(extra_path) if extra_path else None
         self._extra_env_vars = dict(extra_env_vars) if extra_env_vars else None
 
@@ -370,6 +375,7 @@ class SubprocessAdapter(CLIAdapter):
             logger.info("Discovered %d provider env vars from login shell", len(discovered))
 
     _PREFLIGHT_CACHE_TTL = 60.0
+    _REASONING_PROBE_CACHE_TTL = 300.0
 
     def preflight_check(self, service_name: str) -> tuple[bool, str]:
         """Check if a CLI provider is installed and responsive (cached for 60s)."""
@@ -420,6 +426,63 @@ class SubprocessAdapter(CLIAdapter):
         self._preflight_cache[service_name] = (*result, now)
         return result
 
+    def probe_reasoning_effort(
+        self,
+        service_name: str,
+        model_name: str,
+        reasoning_effort: str,
+    ) -> tuple[str, str]:
+        if service_name != "claude_code":
+            return "unknown", ""
+        normalized_effort = normalize_claude_reasoning_effort(reasoning_effort)
+        if normalized_effort is None:
+            return "supported", ""
+        cache_key = (service_name, model_name.strip(), normalized_effort)
+        now = time.time()
+        cached = self._reasoning_probe_cache.get(cache_key)
+        if cached is not None:
+            status, message, ts = cached
+            if now - ts < self._REASONING_PROBE_CACHE_TTL:
+                return status, message
+
+        ok, err, full_cmd, full_input = self._prepare_command(
+            service_name,
+            ["--model", model_name, "--reasoning-effort", normalized_effort],
+            "ping",
+        )
+        if not ok:
+            result = ("unknown", err)
+            self._reasoning_probe_cache[cache_key] = (*result, now)
+            return result
+        try:
+            proc = subprocess.run(
+                full_cmd,
+                capture_output=True,
+                text=True,
+                input=full_input,
+                env=self.env,
+                check=False,
+                timeout=1.5,
+            )
+        except subprocess.TimeoutExpired:
+            result = ("unknown", "probe timed out")
+            self._reasoning_probe_cache[cache_key] = (*result, now)
+            return result
+        except Exception as exc:
+            result = ("unknown", str(exc))
+            self._reasoning_probe_cache[cache_key] = (*result, now)
+            return result
+
+        output = (proc.stdout + proc.stderr).strip()
+        if proc.returncode == 0:
+            result = ("supported", "ok")
+        elif is_claude_effort_unsupported_message(output):
+            result = ("unsupported", output or "runtime probe rejected effort")
+        else:
+            result = ("unknown", output)
+        self._reasoning_probe_cache[cache_key] = (*result, now)
+        return result
+
     _NOISE_LINE_PATTERNS = (
         re.compile(r"^Loaded cached credentials\.?$"),
         re.compile(r"^Loading extension: .+$"),
@@ -460,6 +523,10 @@ class SubprocessAdapter(CLIAdapter):
             ok, err, rewritten_args = self._rewrite_codex_args(rewritten_args)
             if not ok:
                 return False, err, [], ""
+        elif service_name == "claude_code":
+            ok, err, rewritten_args = self._rewrite_claude_args(rewritten_args)
+            if not ok:
+                return False, err, [], ""
         full_cmd = cmd_base + rewritten_args
         stdin_input = full_input
         # Gemini expects prompt value immediately after -p/--prompt.
@@ -493,6 +560,26 @@ class SubprocessAdapter(CLIAdapter):
             if not effort:
                 return False, "Configuration Error: Missing value for --reasoning-effort", []
             rewritten.extend(["-c", f'model_reasoning_effort="{effort}"'])
+            idx += 2
+        return True, "", rewritten
+
+    @staticmethod
+    def _rewrite_claude_args(args: Sequence[str]) -> tuple[bool, str, list[str]]:
+        args_list = list(args)
+        rewritten: list[str] = []
+        idx = 0
+        while idx < len(args_list):
+            token = args_list[idx]
+            if token != "--reasoning-effort":
+                rewritten.append(token)
+                idx += 1
+                continue
+            if idx + 1 >= len(args_list):
+                return False, "Configuration Error: Missing value for --reasoning-effort", []
+            effort = normalize_claude_reasoning_effort(args_list[idx + 1])
+            if not effort:
+                return False, "Configuration Error: Missing value for --reasoning-effort", []
+            rewritten.extend(["--effort", effort])
             idx += 2
         return True, "", rewritten
 

@@ -35,6 +35,22 @@ class BaseAdapter(ABC):
     def preflight_check(self, service_name: str) -> Tuple[bool, str]:
         """Validate provider readiness for this transport."""
 
+    def probe_reasoning_effort(
+        self,
+        service_name: str,
+        model_name: str,
+        reasoning_effort: str,
+    ) -> tuple[str, str]:
+        """Probe provider-specific reasoning support.
+
+        Returns:
+            Tuple of (status, message) where status is one of:
+            - "supported"
+            - "unsupported"
+            - "unknown"
+        """
+        return "unknown", ""
+
 
 # Backward-compat alias used by existing imports/tests.
 CLIAdapter = BaseAdapter

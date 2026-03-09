@@ -352,6 +352,73 @@ def test_run_passes_prompt_as_argument_for_claude_p_mode():
     assert run_mock.call_args.kwargs["input"] == ""
 
 
+def test_run_passes_effort_flag_for_claude_p_mode():
+    adapter = SubprocessAdapter(
+        {"claude_code": {"exec": ["claude", "-p"], "health": ["claude", "--version"]}},
+        system_suffix=" [suffix]",
+    )
+    completed = subprocess.CompletedProcess(
+        args=["claude", "-p", "--model", "sonnet", "--effort", "high", "hello [suffix]"],
+        returncode=0,
+        stdout="ok\n",
+        stderr="",
+    )
+    with patch("shutil.which", return_value="/usr/bin/claude"), patch(
+        "subprocess.run", return_value=completed
+    ) as run_mock:
+        ok, output = adapter.run(
+            "claude_code",
+            ["--model", "sonnet", "--reasoning-effort", "high"],
+            "hello",
+        )
+
+    assert ok is True
+    assert output == "ok"
+    assert run_mock.call_args.args[0] == [
+        "claude",
+        "-p",
+        "--model",
+        "sonnet",
+        "--effort",
+        "high",
+        "hello [suffix]",
+    ]
+    assert run_mock.call_args.kwargs["input"] == ""
+
+
+def test_probe_reasoning_effort_for_claude_subprocess_detects_runtime_unsupported():
+    adapter = SubprocessAdapter(
+        {"claude_code": {"exec": ["claude", "-p"], "health": ["claude", "--version"]}},
+    )
+    completed = subprocess.CompletedProcess(
+        args=["claude", "-p", "--model", "opus", "--effort", "max", "ping"],
+        returncode=1,
+        stdout="",
+        stderr='Error: Effort level "max" is not available for Claude.ai subscribers.',
+    )
+    with patch("shutil.which", return_value="/usr/bin/claude"), patch(
+        "subprocess.run", return_value=completed
+    ):
+        status, message = adapter.probe_reasoning_effort("claude_code", "opus", "max")
+
+    assert status == "unsupported"
+    assert "not available for Claude.ai subscribers" in message
+
+
+def test_probe_reasoning_effort_for_claude_subprocess_returns_unknown_on_timeout():
+    adapter = SubprocessAdapter(
+        {"claude_code": {"exec": ["claude", "-p"], "health": ["claude", "--version"]}},
+    )
+    timeout_exc = subprocess.TimeoutExpired(cmd=["claude", "-p"], timeout=1.5)
+    with patch("shutil.which", return_value="/usr/bin/claude"), patch(
+        "subprocess.run", side_effect=timeout_exc
+    ):
+        status, message = adapter.probe_reasoning_effort("claude_code", "opus", "max")
+
+    assert status == "unknown"
+    assert "timed out" in message
+
+
 def test_run_strips_known_gemini_startup_noise_lines():
     adapter = SubprocessAdapter(
         {"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}},

@@ -177,10 +177,18 @@ You can use the new unified tool:
 - For `codex`/`gemini`/`claude_code`, model trial policy is:
   - explicit `model` => try that model first, then retry once without `--model`
   - no explicit `model` => try provider catalog models in order, then retry once without `--model`
-- `reasoning_effort` is currently Codex-only.
-  - `sdk` mode forwards it as `payload.reasoning.effort`
-  - `subprocess` mode forwards it as `codex exec -c model_reasoning_effort="..."`
-  - when set, Codex fallback candidates are filtered to documented-compatible models only
+- `reasoning_effort` is currently supported for:
+  - `codex`
+  - `claude_code`
+- Provider-specific transport mapping:
+  - `codex` sdk => `payload.reasoning.effort`
+  - `codex` subprocess => `codex exec -c model_reasoning_effort="..."`
+  - `claude_code` sdk => `output_config.effort` plus `thinking={"type":"adaptive"}` for Claude 4.6 aliases
+  - `claude_code` subprocess => `claude --effort <level>`
+- Claude effort handling also uses a transport-specific runtime probe:
+  - confirmed unsupported on the current machine/account => hard fail
+  - probe timeout or inconclusive transport/auth error => pass through to the normal request path
+- when set, provider fallback candidates are filtered to documented-compatible models only
 - Common options across ask tools:
   - `timeout_seconds`
   - `max_output_tokens`
@@ -322,6 +330,10 @@ Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code")` to in
   - `gpt-5.4`: `none`, `low`, `medium`, `high`, `xhigh`
   - `gpt-5.3-codex`, `gpt-5.2-codex`: `low`, `medium`, `high`, `xhigh`
   - `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`: disabled in this MCP until documented support is confirmed
+- Claude 4.6 `reasoning_effort` guardrails are model-specific:
+  - `sonnet` / `claude-sonnet-4-6`: `low`, `medium`, `high`
+  - `opus` / `claude-opus-4-6`: `low`, `medium`, `high`, `max`
+  - `haiku`: disabled in this MCP
 - Note: some Gemini preview models may require additional internal flags/account enablement.
 
 ## Orchestrator Capability Tool
@@ -406,5 +418,5 @@ Integration smoke coverage:
 - Existing tool signatures are preserved:
   - `ask_chatgpt_cli(prompt, save_path=None, force_model=False, model=None, reasoning_effort=None)`
   - `ask_gemini_cli(prompt, save_path=None, force_model=False, model=None)`
-  - `ask_claude_code(prompt, save_path=None, force_model=False, model=None)`
+  - `ask_claude_code(prompt, save_path=None, force_model=False, model=None, reasoning_effort=None)`
   - `ask_ollama(prompt, save_path=None, model=\"default\")`

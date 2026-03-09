@@ -341,7 +341,7 @@ def test_run_async_claude_posts_payload_and_parses_content(monkeypatch):
         models_config=_models_config(),
         env={
             "ANTHROPIC_API_KEY": "ak-test",
-            "ANTHROPIC_MODEL_SONNET": "claude-sonnet-4",
+            "ANTHROPIC_MODEL_SONNET": "claude-sonnet-4-6",
             "ANTHROPIC_MAX_TOKENS": "2048",
         },
         system_suffix=" [suffix]",
@@ -360,12 +360,84 @@ def test_run_async_claude_posts_payload_and_parses_content(monkeypatch):
 
     assert ok is True
     assert output == "claude-ok"
-    assert captured["payload"]["model"] == "claude-sonnet-4"
+    assert captured["payload"]["model"] == "claude-sonnet-4-6"
     assert captured["payload"]["max_tokens"] == 2048
     assert captured["payload"]["messages"][0]["content"] == "hello [suffix]"
+    assert "output_config" not in captured["payload"]
+    assert "thinking" not in captured["payload"]
     assert captured["api_key"] == "ak-test"
     assert captured["access_token"] == ""
     assert captured["timeout_seconds"] == 27.0
+
+
+def test_run_async_claude_adds_effort_and_adaptive_thinking(monkeypatch):
+    captured = {}
+    adapter = SDKAdapter(
+        models_config=_models_config(),
+        env={
+            "ANTHROPIC_API_KEY": "ak-test",
+            "ANTHROPIC_MODEL_SONNET": "claude-sonnet-4-6",
+        },
+    )
+
+    def _fake_post(payload, api_key, access_token, timeout_seconds):
+        captured["payload"] = payload
+        return True, {"content": [{"type": "text", "text": "claude-ok"}]}
+
+    monkeypatch.setattr(adapter, "_post_claude_json", _fake_post)
+
+    ok, output = asyncio.run(
+        adapter.run_async(
+            "claude_code",
+            ["--model", "sonnet", "--reasoning-effort", "high"],
+            "hello",
+        )
+    )
+
+    assert ok is True
+    assert output == "claude-ok"
+    assert captured["payload"]["model"] == "claude-sonnet-4-6"
+    assert captured["payload"]["output_config"] == {"effort": "high"}
+    assert captured["payload"]["thinking"] == {"type": "adaptive"}
+
+
+def test_probe_reasoning_effort_for_claude_sdk_detects_runtime_unsupported(monkeypatch):
+    adapter = SDKAdapter(
+        models_config=_models_config(),
+        env={"ANTHROPIC_API_KEY": "ak-test", "ANTHROPIC_MODEL_OPUS": "claude-opus-4-6"},
+    )
+
+    monkeypatch.setattr(
+        adapter,
+        "_post_claude_json",
+        lambda *args, **kwargs: (
+            False,
+            '[SDK REQUEST ERROR] provider=claude_code status=400 detail=Effort level "max" is not available for this account.',
+        ),
+    )
+
+    status, message = adapter.probe_reasoning_effort("claude_code", "opus", "max")
+
+    assert status == "unsupported"
+    assert "not available for this account" in message
+
+
+def test_probe_reasoning_effort_for_claude_sdk_returns_unknown_on_transport_error(monkeypatch):
+    adapter = SDKAdapter(
+        models_config=_models_config(),
+        env={"ANTHROPIC_API_KEY": "ak-test", "ANTHROPIC_MODEL_OPUS": "claude-opus-4-6"},
+    )
+
+    monkeypatch.setattr(
+        adapter,
+        "_post_claude_json",
+        lambda *args, **kwargs: (False, "[SDK REQUEST ERROR] provider=claude_code reason=timed out"),
+    )
+
+    status, message = adapter.probe_reasoning_effort("claude_code", "opus", "max")
+
+    assert status == "unknown"
+    assert "timed out" in message
 
 
 def test_run_async_claude_returns_auth_error_without_key():

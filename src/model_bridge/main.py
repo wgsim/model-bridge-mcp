@@ -24,6 +24,11 @@ from model_bridge.core.batch_executor import (
     PrioritizedJob,
     parse_priority,
 )
+from model_bridge.core.claude_capabilities import (
+    filter_claude_models_for_reasoning_effort,
+    normalize_claude_reasoning_effort,
+    validate_claude_reasoning_effort,
+)
 from model_bridge.core.codex_capabilities import (
     filter_codex_models_for_reasoning_effort,
     normalize_codex_reasoning_effort,
@@ -308,7 +313,7 @@ async def _dispatch_ask_provider(
             model=model,
             **common_kwargs,
         )
-    if provider_id == "codex":
+    if provider_id in {"codex", "claude_code"}:
         return await handler(
             prompt,
             model=model,
@@ -562,6 +567,65 @@ def _normalize_model_override(provider: str, model: str | None) -> str | None:
     return token
 
 
+def _normalize_provider_reasoning_effort(
+    provider: str,
+    reasoning_effort: str | None,
+) -> str | None:
+    if provider == "codex":
+        return normalize_codex_reasoning_effort(reasoning_effort)
+    if provider == "claude_code":
+        return normalize_claude_reasoning_effort(reasoning_effort)
+    token = (reasoning_effort or "").strip()
+    if token:
+        raise ValueError(f"reasoning_effort is not supported for provider='{provider}'")
+    return None
+
+
+def _validate_provider_reasoning_effort(
+    provider: str,
+    model_name: str,
+    reasoning_effort: str | None,
+) -> str | None:
+    if provider == "codex":
+        return validate_codex_reasoning_effort(model_name, reasoning_effort)
+    if provider == "claude_code":
+        return validate_claude_reasoning_effort(model_name, reasoning_effort)
+    return _normalize_provider_reasoning_effort(provider, reasoning_effort)
+
+
+def _filter_provider_models_for_reasoning_effort(
+    provider: str,
+    model_names: list[str] | tuple[str, ...],
+    reasoning_effort: str | None,
+) -> list[str]:
+    normalized = _normalize_provider_reasoning_effort(provider, reasoning_effort)
+    if normalized is None:
+        return [token for token in ((item or "").strip() for item in model_names) if token]
+    if provider == "codex":
+        return filter_codex_models_for_reasoning_effort(model_names, normalized)
+    if provider == "claude_code":
+        return filter_claude_models_for_reasoning_effort(model_names, normalized)
+    raise ValueError(f"reasoning_effort is not supported for provider='{provider}'")
+
+
+def _probe_provider_reasoning_effort(
+    provider: str,
+    model_name: str,
+    reasoning_effort: str | None,
+) -> tuple[str, str]:
+    normalized = _normalize_provider_reasoning_effort(provider, reasoning_effort)
+    if normalized is None:
+        return "supported", ""
+    try:
+        adapter = _get_adapter()
+    except Exception as exc:
+        return "unknown", str(exc)
+    try:
+        return adapter.probe_reasoning_effort(provider, model_name, normalized)
+    except Exception as exc:
+        return "unknown", str(exc)
+
+
 def _build_provider_model_args(provider: str, model: str | None) -> list[str]:
     return _build_provider_args(provider, model=model, reasoning_effort=None)
 
@@ -575,8 +639,8 @@ def _build_provider_args(
     args: list[str] = []
     if model and provider in {"codex", "gemini", "claude_code"}:
         args.extend(["--model", model])
-    if provider == "codex":
-        normalized_effort = normalize_codex_reasoning_effort(reasoning_effort)
+    if provider in {"codex", "claude_code"}:
+        normalized_effort = _normalize_provider_reasoning_effort(provider, reasoning_effort)
         if normalized_effort:
             args.extend(["--reasoning-effort", normalized_effort])
     return args
@@ -609,21 +673,52 @@ def _build_provider_model_trials(
 ) -> list[str | None]:
     explicit = _normalize_model_override(provider, requested_model)
     trials: list[str | None] = []
-    normalized_effort = (
-        normalize_codex_reasoning_effort(reasoning_effort) if provider == "codex" else None
-    )
+    normalized_effort = _normalize_provider_reasoning_effort(provider, reasoning_effort)
     if explicit:
-        if provider == "codex":
-            validate_codex_reasoning_effort(explicit, normalized_effort)
+        if provider in {"codex", "claude_code"}:
+            _validate_provider_reasoning_effort(provider, explicit, normalized_effort)
+            if provider == "claude_code" and normalized_effort is not None:
+                probe_status, probe_message = _probe_provider_reasoning_effort(
+                    provider,
+                    explicit,
+                    normalized_effort,
+                )
+                if probe_status == "unsupported":
+                    raise ValueError(
+                        f"Model '{explicit}' does not support reasoning_effort='{normalized_effort}' "
+                        f"on the current transport. {probe_message}".strip()
+                    )
         trials.append(explicit)
     else:
         catalog_key = f"{provider}_model_catalog"
         catalog = _get_config().get("models", {}).get(catalog_key, [])
-        if provider == "codex" and normalized_effort is not None:
-            compatible = filter_codex_models_for_reasoning_effort(catalog, normalized_effort)
+        if provider in {"codex", "claude_code"} and normalized_effort is not None:
+            compatible = _filter_provider_models_for_reasoning_effort(
+                provider,
+                catalog,
+                normalized_effort,
+            )
+            if provider == "claude_code":
+                runtime_filtered: list[str] = []
+                runtime_rejections: list[str] = []
+                for candidate in compatible:
+                    probe_status, probe_message = _probe_provider_reasoning_effort(
+                        provider,
+                        candidate,
+                        normalized_effort,
+                    )
+                    if probe_status == "unsupported":
+                        runtime_rejections.append(f"{candidate}: {probe_message}".strip())
+                        continue
+                    runtime_filtered.append(candidate)
+                compatible = runtime_filtered
             if not compatible:
+                rejection_suffix = ""
+                if provider == "claude_code" and runtime_rejections:
+                    rejection_suffix = f" Runtime probe rejected: {'; '.join(runtime_rejections)}"
                 raise ValueError(
-                    f"No configured Codex models support reasoning_effort='{normalized_effort}'."
+                    f"No configured {provider} models support reasoning_effort='{normalized_effort}'."
+                    f"{rejection_suffix}"
                 )
             trials.extend(compatible)
         else:
@@ -741,7 +836,7 @@ async def ask_chatgpt_cli(
         save_path: Optional file path to save the response.
         force_model: If True, skip failover and only use the primary provider.
         model: Model name override (e.g. 'gpt-4o'). None uses config default.
-        reasoning_effort: Codex-only reasoning effort override.
+        reasoning_effort: Provider-specific reasoning effort override for supported providers.
         timeout_seconds: Per-call timeout in seconds. Default from config (~120s).
         max_output_tokens: Limit response tokens (provider-dependent).
         response_format: 'json' for JSON output, None for plain text.
@@ -928,6 +1023,7 @@ async def ask_claude_code(
     save_path: str = None,
     force_model: bool = False,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     timeout_seconds: float | None = None,
     max_output_tokens: int | None = None,
     response_format: str | None = None,
@@ -942,6 +1038,7 @@ async def ask_claude_code(
         save_path: Optional file path to save the response.
         force_model: If True, skip failover and only use Claude Code.
         model: Model name override. None uses config default.
+        reasoning_effort: Claude-only reasoning effort override.
         timeout_seconds: Per-call timeout in seconds. Default from config (~120s).
         max_output_tokens: Limit response tokens (provider-dependent).
         response_format: 'json' for JSON output, None for plain text.
@@ -972,7 +1069,7 @@ async def ask_claude_code(
         save_path=save_path,
         force_model=force_model,
         model=model,
-        reasoning_effort=None,
+        reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
         max_output_tokens=max_output_tokens,
         response_format=response_format,
@@ -1027,9 +1124,10 @@ async def ask(
     normalized_instruction_preset = _resolve_instruction_preset(instruction_preset)
     requested_provider = (provider or "auto").strip().lower()
     normalized_provider = "codex" if requested_provider == "auto" else requested_provider
-    normalized_reasoning_effort = normalize_codex_reasoning_effort(reasoning_effort)
-    if normalized_reasoning_effort and normalized_provider != "codex":
-        raise ValueError("reasoning_effort is currently supported only for provider='codex'")
+    normalized_reasoning_effort = _normalize_provider_reasoning_effort(
+        normalized_provider,
+        reasoning_effort,
+    )
     effective_prompt = _build_prompt_with_session(prompt, session_id)
     effective_prompt = _apply_instruction_preset(
         effective_prompt, normalized_instruction_preset, options["response_format"]

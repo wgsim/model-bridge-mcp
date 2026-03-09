@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence, Tuple
 
 from .base import CLIAdapter
+from model_bridge.core.claude_capabilities import (
+    get_claude_thinking_config,
+    is_claude_effort_unsupported_message,
+    normalize_claude_reasoning_effort,
+    validate_claude_reasoning_effort,
+)
 from model_bridge.core.codex_capabilities import (
     DEFAULT_CODEX_MODEL,
     normalize_codex_reasoning_effort,
@@ -36,6 +42,9 @@ class SDKAdapter(CLIAdapter):
         self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
         self.timeout_seconds = timeout_seconds
         self.default_codex_model = DEFAULT_CODEX_MODEL
+        self._reasoning_probe_cache: dict[tuple[str, str, str], tuple[str, str, float]] = {}
+
+    _REASONING_PROBE_CACHE_TTL = 300.0
 
     def preflight_check(self, service_name: str) -> Tuple[bool, str]:
         known = {"codex", "gemini", "ollama", "claude_code"}
@@ -383,6 +392,69 @@ class SDKAdapter(CLIAdapter):
         if idx + 1 >= len(args_list):
             raise ValueError("Missing value for --reasoning-effort")
         return normalize_codex_reasoning_effort(args_list[idx + 1])
+
+    def _resolve_claude_reasoning_effort(self, args: Sequence[str]) -> str | None:
+        args_list = list(args)
+        if "--reasoning-effort" not in args_list:
+            return None
+        idx = args_list.index("--reasoning-effort")
+        if idx + 1 >= len(args_list):
+            raise ValueError("Missing value for --reasoning-effort")
+        return normalize_claude_reasoning_effort(args_list[idx + 1])
+
+    def probe_reasoning_effort(
+        self,
+        service_name: str,
+        model_name: str,
+        reasoning_effort: str,
+    ) -> tuple[str, str]:
+        if service_name != "claude_code":
+            return "unknown", ""
+        normalized_effort = normalize_claude_reasoning_effort(reasoning_effort)
+        if normalized_effort is None:
+            return "supported", ""
+        cache_key = (service_name, model_name.strip(), normalized_effort)
+        now = time.time()
+        cached = self._reasoning_probe_cache.get(cache_key)
+        if cached is not None:
+            status, message, ts = cached
+            if now - ts < self._REASONING_PROBE_CACHE_TTL:
+                return status, message
+
+        api_key, access_token = self._resolve_anthropic_auth()
+        if not api_key and not access_token:
+            result = ("unknown", "missing anthropic auth")
+            self._reasoning_probe_cache[cache_key] = (*result, now)
+            return result
+
+        resolved_model = self._resolve_claude_model(["--model", model_name])
+        payload = {
+            "model": resolved_model,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "ping"}],
+            "output_config": {"effort": normalized_effort},
+        }
+        thinking = get_claude_thinking_config(resolved_model, normalized_effort)
+        if thinking is None:
+            thinking = get_claude_thinking_config(model_name, normalized_effort)
+        if thinking:
+            payload["thinking"] = thinking
+        try:
+            ok, raw = self._post_claude_json(payload, api_key, access_token, 2.0)
+        except Exception as exc:
+            result = ("unknown", str(exc))
+            self._reasoning_probe_cache[cache_key] = (*result, now)
+            return result
+        if ok:
+            result = ("supported", "ok")
+        else:
+            message = str(raw)
+            if is_claude_effort_unsupported_message(message):
+                result = ("unsupported", message)
+            else:
+                result = ("unknown", message)
+        self._reasoning_probe_cache[cache_key] = (*result, now)
+        return result
 
     def _resolve_gemini_model(self, args: Sequence[str]) -> str:
         from_args = self._resolve_model("gemini", args)
@@ -819,11 +891,19 @@ class SDKAdapter(CLIAdapter):
                 "[SDK AUTH ERROR] Missing ANTHROPIC_API_KEY or ANTHROPIC OAuth access token.",
             )
         model_name = self._resolve_claude_model(args)
+        reasoning_effort = self._resolve_claude_reasoning_effort(args)
+        if reasoning_effort:
+            validate_claude_reasoning_effort(model_name, reasoning_effort)
         payload = {
             "model": model_name,
             "max_tokens": self._resolve_anthropic_max_tokens(),
             "messages": [{"role": "user", "content": full_input}],
         }
+        if reasoning_effort:
+            payload["output_config"] = {"effort": reasoning_effort}
+            thinking = get_claude_thinking_config(model_name, reasoning_effort)
+            if thinking:
+                payload["thinking"] = thinking
         ok, raw = await asyncio.to_thread(
             self._post_claude_json,
             payload,

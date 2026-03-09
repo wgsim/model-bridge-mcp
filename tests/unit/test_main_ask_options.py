@@ -304,6 +304,109 @@ def test_ask_claude_code_passes_model_override_to_primary_provider(monkeypatch):
     }
 
 
+def test_ask_claude_code_passes_reasoning_effort_to_primary_provider(monkeypatch):
+    fake_failover = _CaptureProviderArgsFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
+
+    out = asyncio.run(
+        main_module.ask_claude_code(
+            "hi",
+            model="sonnet",
+            reasoning_effort="high",
+        )
+    )
+
+    assert out == "ok"
+    assert fake_failover.last["provider_args"] == {
+        "claude_code": ["--model", "sonnet", "--reasoning-effort", "high"]
+    }
+
+
+def test_ask_claude_code_rejects_reasoning_effort_for_haiku():
+    with pytest.raises(ValueError, match="does not support reasoning_effort"):
+        asyncio.run(
+            main_module.ask_claude_code(
+                "hi",
+                model="haiku",
+                reasoning_effort="high",
+            )
+        )
+
+
+def test_ask_claude_code_rejects_max_reasoning_effort_for_sonnet():
+    with pytest.raises(ValueError, match="does not support reasoning_effort='max'"):
+        asyncio.run(
+            main_module.ask_claude_code(
+                "hi",
+                model="sonnet",
+                reasoning_effort="max",
+            )
+        )
+
+
+def test_ask_claude_code_rejects_runtime_unsupported_reasoning_effort(monkeypatch):
+    monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
+
+    class FakeAdapter:
+        def preflight_check(self, provider):
+            return True, ""
+
+        def probe_reasoning_effort(self, service_name, model_name, reasoning_effort):
+            return "unsupported", 'Effort level "max" is not available for Claude.ai subscribers.'
+
+    monkeypatch.setattr(main_module, "_get_adapter", lambda: FakeAdapter())
+
+    with pytest.raises(ValueError, match="not available for Claude.ai subscribers"):
+        asyncio.run(
+            main_module.ask_claude_code(
+                "hi",
+                model="opus",
+                reasoning_effort="max",
+            )
+        )
+
+
+def test_ask_claude_code_filters_catalog_by_reasoning_effort(monkeypatch):
+    fake_failover = _TrialSequenceFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
+    monkeypatch.setattr(
+        main_module,
+        "_get_config",
+        lambda: {
+            "models": {"claude_code_model_catalog": ["haiku", "sonnet", "opus"]},
+            "runtime": {
+                "ask_defaults": {
+                    "timeout_seconds": 120,
+                    "max_output_tokens": 0,
+                    "response_format": "text",
+                    "verbosity": "normal",
+                    "stream": False,
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_get_adapter",
+        lambda: type(
+            "FakeAdapter",
+            (),
+            {
+                "preflight_check": lambda self, provider: (True, ""),
+                "probe_reasoning_effort": lambda self, service_name, model_name, reasoning_effort: (
+                    "unsupported",
+                    'Effort level "max" is not available for Claude.ai subscribers.',
+                ) if model_name == "opus" else ("supported", "ok"),
+            },
+        )(),
+    )
+
+    with pytest.raises(ValueError, match="Runtime probe rejected"):
+        asyncio.run(main_module.ask_claude_code("hi", reasoning_effort="max"))
+
+
 def test_ask_gemini_cli_falls_back_to_no_model_after_catalog_failures(monkeypatch):
     fake_failover = _TrialSequenceFailover()
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
@@ -367,3 +470,28 @@ def test_ask_unified_codex_passes_reasoning_effort(monkeypatch):
     assert captured["provider_id"] == "codex"
     assert captured["kwargs"]["model"] == "gpt-5.4"
     assert captured["kwargs"]["reasoning_effort"] == "low"
+
+
+def test_ask_unified_claude_passes_reasoning_effort(monkeypatch):
+    captured = {}
+
+    async def _fake_dispatch(provider_id, prompt, **kwargs):
+        captured["provider_id"] = provider_id
+        captured["kwargs"] = kwargs
+        return "ok"
+
+    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
+
+    out = asyncio.run(
+        main_module.ask(
+            "hi",
+            provider="claude_code",
+            model="sonnet",
+            reasoning_effort="medium",
+        )
+    )
+
+    assert out == "ok"
+    assert captured["provider_id"] == "claude_code"
+    assert captured["kwargs"]["model"] == "sonnet"
+    assert captured["kwargs"]["reasoning_effort"] == "medium"
