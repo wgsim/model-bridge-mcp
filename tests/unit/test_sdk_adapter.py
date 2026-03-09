@@ -9,7 +9,7 @@ from model_bridge.adapters.sdk_adapter import SDKAdapter
 
 def _models_config() -> dict:
     return {
-        "codex_model_catalog": ["gpt-5.2-codex", "gpt-5.3-codex"],
+        "codex_model_catalog": ["gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"],
         "gemini_model_catalog": ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"],
         "claude_code_model_catalog": ["haiku", "sonnet", "opus"],
         "ollama_default_model": "gpt-oss:20b",
@@ -136,6 +136,72 @@ def test_run_async_codex_posts_payload_and_parses_output_text(monkeypatch):
     assert captured["payload"]["model"] == "gpt-5.3-codex"
     assert captured["payload"]["input"] == "hello [suffix]"
     assert captured["timeout_seconds"] == 45.0
+
+
+def test_run_async_codex_defaults_to_gpt_5_4_from_catalog(monkeypatch):
+    captured = {}
+    adapter = SDKAdapter(
+        models_config=_models_config(),
+        env={"OPENAI_API_KEY": "sk-test"},
+    )
+
+    def _fake_post(url, token, payload, timeout_seconds):
+        captured["payload"] = payload
+        return True, {"output_text": "ok"}
+
+    monkeypatch.setattr(adapter, "_post_json", _fake_post)
+
+    ok, output = asyncio.run(adapter.run_async("codex", [], "hello"))
+
+    assert ok is True
+    assert output == "ok"
+    assert captured["payload"]["model"] == "gpt-5.4"
+
+
+def test_run_async_codex_adds_reasoning_effort_to_payload(monkeypatch):
+    captured = {}
+    adapter = SDKAdapter(
+        models_config=_models_config(),
+        env={"OPENAI_API_KEY": "sk-test"},
+    )
+
+    def _fake_post(url, token, payload, timeout_seconds):
+        captured["payload"] = payload
+        return True, {"output_text": "ok"}
+
+    monkeypatch.setattr(adapter, "_post_json", _fake_post)
+
+    ok, output = asyncio.run(
+        adapter.run_async("codex", ["--model", "gpt-5.4", "--reasoning-effort", "high"], "hello")
+    )
+
+    assert ok is True
+    assert output == "ok"
+    assert captured["payload"]["reasoning"] == {"effort": "high"}
+
+
+def test_run_async_codex_falls_back_to_gpt_5_4_when_catalog_is_empty(monkeypatch):
+    captured = {}
+    adapter = SDKAdapter(
+        models_config={
+            "codex_model_catalog": [],
+            "ollama_default_model": "gpt-oss:20b",
+            "ollama_aliases": {"default": "gpt-oss:20b"},
+        },
+        env={"OPENAI_API_KEY": "sk-test"},
+    )
+
+    def _fake_post(url, token, payload, timeout_seconds):
+        captured["payload"] = payload
+        return True, {"output_text": "ok"}
+
+    monkeypatch.setattr(adapter, "_post_json", _fake_post)
+
+    ok, output = asyncio.run(adapter.run_async("codex", [], "hello"))
+
+    assert ok is True
+    assert output == "ok"
+    assert captured["payload"]["model"] == "gpt-5.4"
 
 
 def test_run_async_codex_extracts_nested_output_blocks(monkeypatch):

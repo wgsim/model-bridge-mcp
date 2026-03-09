@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Mapping, Sequence, Tuple
 
 from .base import CLIAdapter
+from model_bridge.core.codex_capabilities import normalize_codex_reasoning_effort
 
 logger = logging.getLogger("model_bridge.subprocess_adapter")
 
@@ -454,7 +455,12 @@ class SubprocessAdapter(CLIAdapter):
             full_input = input_text + self.system_suffix
         else:
             full_input = input_text
-        full_cmd = cmd_base + list(args)
+        rewritten_args = list(args)
+        if service_name == "codex":
+            ok, err, rewritten_args = self._rewrite_codex_args(rewritten_args)
+            if not ok:
+                return False, err, [], ""
+        full_cmd = cmd_base + rewritten_args
         stdin_input = full_input
         # Gemini expects prompt value immediately after -p/--prompt.
         if service_name == "gemini" and any(flag in cmd_base for flag in ("-p", "--prompt")):
@@ -469,6 +475,26 @@ class SubprocessAdapter(CLIAdapter):
             full_cmd = full_cmd + [full_input]
             stdin_input = ""
         return True, "", full_cmd, stdin_input
+
+    @staticmethod
+    def _rewrite_codex_args(args: Sequence[str]) -> tuple[bool, str, list[str]]:
+        args_list = list(args)
+        rewritten: list[str] = []
+        idx = 0
+        while idx < len(args_list):
+            token = args_list[idx]
+            if token != "--reasoning-effort":
+                rewritten.append(token)
+                idx += 1
+                continue
+            if idx + 1 >= len(args_list):
+                return False, "Configuration Error: Missing value for --reasoning-effort", []
+            effort = normalize_codex_reasoning_effort(args_list[idx + 1])
+            if not effort:
+                return False, "Configuration Error: Missing value for --reasoning-effort", []
+            rewritten.extend(["-c", f'model_reasoning_effort="{effort}"'])
+            idx += 2
+        return True, "", rewritten
 
     @staticmethod
     def _provider_timeout_hint(service_name: str, details: str) -> str:

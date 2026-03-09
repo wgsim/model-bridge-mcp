@@ -24,6 +24,11 @@ from model_bridge.core.batch_executor import (
     PrioritizedJob,
     parse_priority,
 )
+from model_bridge.core.codex_capabilities import (
+    filter_codex_models_for_reasoning_effort,
+    normalize_codex_reasoning_effort,
+    validate_codex_reasoning_effort,
+)
 from model_bridge.core.failover_manager import FailoverManager, get_last_errors as _get_last_errors_from_buffer
 from model_bridge.core.plugin_loader import PluginLoader
 from model_bridge.core.provider_registry import ProviderRegistry, build_default_provider_registry
@@ -262,6 +267,7 @@ async def _dispatch_ask_provider(
     save_path: str | None,
     force_model: bool,
     model: str,
+    reasoning_effort: str | None,
     options: dict,
     output_mode: str,
 ) -> str:
@@ -300,6 +306,14 @@ async def _dispatch_ask_provider(
         return await handler(
             prompt,
             model=model,
+            **common_kwargs,
+        )
+    if provider_id == "codex":
+        return await handler(
+            prompt,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            force_model=force_model,
             **common_kwargs,
         )
     return await handler(
@@ -549,11 +563,23 @@ def _normalize_model_override(provider: str, model: str | None) -> str | None:
 
 
 def _build_provider_model_args(provider: str, model: str | None) -> list[str]:
-    if not model:
-        return []
-    if provider in {"codex", "gemini", "claude_code"}:
-        return ["--model", model]
-    return []
+    return _build_provider_args(provider, model=model, reasoning_effort=None)
+
+
+def _build_provider_args(
+    provider: str,
+    *,
+    model: str | None,
+    reasoning_effort: str | None,
+) -> list[str]:
+    args: list[str] = []
+    if model and provider in {"codex", "gemini", "claude_code"}:
+        args.extend(["--model", model])
+    if provider == "codex":
+        normalized_effort = normalize_codex_reasoning_effort(reasoning_effort)
+        if normalized_effort:
+            args.extend(["--reasoning-effort", normalized_effort])
+    return args
 
 
 def _is_task_execution_failed(response: str) -> bool:
@@ -576,19 +602,36 @@ def _is_model_selection_failure(response: str) -> bool:
     return any(marker in low for marker in markers)
 
 
-def _build_provider_model_trials(provider: str, requested_model: str | None) -> list[str | None]:
+def _build_provider_model_trials(
+    provider: str,
+    requested_model: str | None,
+    reasoning_effort: str | None = None,
+) -> list[str | None]:
     explicit = _normalize_model_override(provider, requested_model)
     trials: list[str | None] = []
+    normalized_effort = (
+        normalize_codex_reasoning_effort(reasoning_effort) if provider == "codex" else None
+    )
     if explicit:
+        if provider == "codex":
+            validate_codex_reasoning_effort(explicit, normalized_effort)
         trials.append(explicit)
     else:
         catalog_key = f"{provider}_model_catalog"
         catalog = _get_config().get("models", {}).get(catalog_key, [])
-        for item in catalog:
-            token = (item or "").strip()
-            if token and token not in trials:
-                trials.append(token)
-    if None not in trials:
+        if provider == "codex" and normalized_effort is not None:
+            compatible = filter_codex_models_for_reasoning_effort(catalog, normalized_effort)
+            if not compatible:
+                raise ValueError(
+                    f"No configured Codex models support reasoning_effort='{normalized_effort}'."
+                )
+            trials.extend(compatible)
+        else:
+            for item in catalog:
+                token = (item or "").strip()
+                if token and token not in trials:
+                    trials.append(token)
+    if normalized_effort is None and None not in trials:
         trials.append(None)
     return trials
 
@@ -602,12 +645,14 @@ def _list_static_provider_models(provider_id: str) -> dict:
     commands_cfg = _get_config()["commands"]
     catalog_key = f"{provider_id}_model_catalog"
     catalog = models_cfg.get(catalog_key, [])
+    default_model = next((str(item).strip() for item in catalog if str(item).strip()), None)
     return {
         "configured": _is_provider_configured(provider_id),
         "source": "config",
         "model_flag": "--model",
         "catalog": catalog,
         "catalog_count": len(catalog),
+        "default_model": default_model,
         "command": commands_cfg.get(provider_id, {}).get("exec", []),
     }
 
@@ -623,6 +668,7 @@ async def _ask_with_failover(
     save_path: str | None,
     force_model: bool,
     model: str | None,
+    reasoning_effort: str | None,
     timeout_seconds: float | None,
     max_output_tokens: int | None,
     response_format: str | None,
@@ -639,9 +685,19 @@ async def _ask_with_failover(
     primary_provider = default_primary
 
     response = ""
-    for trial_model in _build_provider_model_trials(primary_provider, model):
+    for trial_model in _build_provider_model_trials(
+        primary_provider,
+        model,
+        reasoning_effort=reasoning_effort,
+    ):
         provider_args = (
-            {primary_provider: _build_provider_model_args(primary_provider, trial_model)}
+            {
+                primary_provider: _build_provider_args(
+                    primary_provider,
+                    model=trial_model,
+                    reasoning_effort=reasoning_effort,
+                )
+            }
             if trial_model is not None
             else None
         )
@@ -670,6 +726,7 @@ async def ask_chatgpt_cli(
     save_path: str = None,
     force_model: bool = False,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     timeout_seconds: float | None = None,
     max_output_tokens: int | None = None,
     response_format: str | None = None,
@@ -684,6 +741,7 @@ async def ask_chatgpt_cli(
         save_path: Optional file path to save the response.
         force_model: If True, skip failover and only use the primary provider.
         model: Model name override (e.g. 'gpt-4o'). None uses config default.
+        reasoning_effort: Codex-only reasoning effort override.
         timeout_seconds: Per-call timeout in seconds. Default from config (~120s).
         max_output_tokens: Limit response tokens (provider-dependent).
         response_format: 'json' for JSON output, None for plain text.
@@ -704,6 +762,7 @@ async def ask_chatgpt_cli(
         save_path=save_path,
         force_model=force_model,
         model=model,
+        reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
         max_output_tokens=max_output_tokens,
         response_format=response_format,
@@ -753,6 +812,7 @@ async def ask_gemini_cli(
         save_path=save_path,
         force_model=force_model,
         model=model,
+        reasoning_effort=None,
         timeout_seconds=timeout_seconds,
         max_output_tokens=max_output_tokens,
         response_format=response_format,
@@ -912,6 +972,7 @@ async def ask_claude_code(
         save_path=save_path,
         force_model=force_model,
         model=model,
+        reasoning_effort=None,
         timeout_seconds=timeout_seconds,
         max_output_tokens=max_output_tokens,
         response_format=response_format,
@@ -926,6 +987,7 @@ async def ask(
     prompt: str,
     provider: str = "auto",
     model: str = "default",
+    reasoning_effort: str | None = None,
     save_path: str = None,
     force_model: bool = False,
     timeout_seconds: float | None = None,
@@ -943,6 +1005,7 @@ async def ask(
         prompt: The text prompt to send.
         provider: 'auto' (default, routes to codex), 'codex', 'gemini', 'ollama', 'claude_code'.
         model: Model name or 'default'/'auto'. Provider-specific (e.g. 'gpt-4o', 'gemini-2.5-pro').
+        reasoning_effort: Codex-only reasoning effort override.
         save_path: Optional file path to save the response.
         force_model: If True, skip failover chain.
         timeout_seconds: Per-call timeout in seconds. Default from config.
@@ -964,6 +1027,9 @@ async def ask(
     normalized_instruction_preset = _resolve_instruction_preset(instruction_preset)
     requested_provider = (provider or "auto").strip().lower()
     normalized_provider = "codex" if requested_provider == "auto" else requested_provider
+    normalized_reasoning_effort = normalize_codex_reasoning_effort(reasoning_effort)
+    if normalized_reasoning_effort and normalized_provider != "codex":
+        raise ValueError("reasoning_effort is currently supported only for provider='codex'")
     effective_prompt = _build_prompt_with_session(prompt, session_id)
     effective_prompt = _apply_instruction_preset(
         effective_prompt, normalized_instruction_preset, options["response_format"]
@@ -976,6 +1042,7 @@ async def ask(
             {
                 "provider": normalized_provider,
                 "model": model,
+                "reasoning_effort": normalized_reasoning_effort,
                 "prompt": effective_prompt,
                 "force_model": force_model,
                 "options": json.dumps(options, sort_keys=True),
@@ -1004,6 +1071,7 @@ async def ask(
         save_path=save_path,
         force_model=force_model,
         model=model,
+        reasoning_effort=normalized_reasoning_effort,
         options=options,
         output_mode=normalized_output_mode,
     )
@@ -1019,6 +1087,7 @@ async def ask_batch(
     prompts: list[str],
     provider: str = "auto",
     model: str = "default",
+    reasoning_effort: str | None = None,
     mode: str = "sequential",
     max_concurrency: int = 3,
     save_path: str = None,
@@ -1042,6 +1111,7 @@ async def ask_batch(
         prompts: List of text prompts to send.
         provider: 'auto' (default), 'codex', 'gemini', 'ollama', 'claude_code'.
         model: Model name or 'default'/'auto'.
+        reasoning_effort: Codex-only reasoning effort override.
         mode: 'sequential' (default) or 'parallel'.
         max_concurrency: Max parallel requests when mode='parallel' (default 3).
         save_path: Optional file path to save combined results.
@@ -1107,6 +1177,7 @@ async def ask_batch(
                 prompt=prompt_text,
                 provider=provider,
                 model=model,
+                reasoning_effort=reasoning_effort,
                 save_path=save_path,
                 force_model=force_model,
                 timeout_seconds=options["timeout_seconds"],

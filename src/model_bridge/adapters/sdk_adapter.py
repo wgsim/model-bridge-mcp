@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence, Tuple
 
 from .base import CLIAdapter
+from model_bridge.core.codex_capabilities import (
+    DEFAULT_CODEX_MODEL,
+    normalize_codex_reasoning_effort,
+)
 
 
 class SDKAdapter(CLIAdapter):
@@ -31,7 +35,7 @@ class SDKAdapter(CLIAdapter):
         self.system_suffix = system_suffix
         self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
         self.timeout_seconds = timeout_seconds
-        self.default_codex_model = "gpt-5.2-codex"
+        self.default_codex_model = DEFAULT_CODEX_MODEL
 
     def preflight_check(self, service_name: str) -> Tuple[bool, str]:
         known = {"codex", "gemini", "ollama", "claude_code"}
@@ -370,6 +374,15 @@ class SDKAdapter(CLIAdapter):
                 if token:
                     return token
         return self.default_codex_model
+
+    def _resolve_codex_reasoning_effort(self, args: Sequence[str]) -> str | None:
+        args_list = list(args)
+        if "--reasoning-effort" not in args_list:
+            return None
+        idx = args_list.index("--reasoning-effort")
+        if idx + 1 >= len(args_list):
+            raise ValueError("Missing value for --reasoning-effort")
+        return normalize_codex_reasoning_effort(args_list[idx + 1])
 
     def _resolve_gemini_model(self, args: Sequence[str]) -> str:
         from_args = self._resolve_model("gemini", args)
@@ -751,6 +764,9 @@ class SDKAdapter(CLIAdapter):
             return False, "[SDK AUTH ERROR] Missing OPENAI_API_KEY (recommended) or OPENAI_ACCESS_TOKEN."
         model_name = self._resolve_codex_model(args)
         payload = {"model": model_name, "input": full_input}
+        reasoning_effort = self._resolve_codex_reasoning_effort(args)
+        if reasoning_effort:
+            payload["reasoning"] = {"effort": reasoning_effort}
         url = f"{self._resolve_base_url()}/responses"
         ok, raw = await asyncio.to_thread(self._post_json, url, token, payload, float(timeout_seconds))
         if not ok:

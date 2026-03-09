@@ -180,6 +180,67 @@ def test_ask_chatgpt_cli_passes_model_override_to_primary_provider(monkeypatch):
     assert fake_failover.last["provider_args"] == {"codex": ["--model", "gpt-5"]}
 
 
+def test_ask_chatgpt_cli_passes_reasoning_effort_to_primary_provider(monkeypatch):
+    fake_failover = _CaptureProviderArgsFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(main_module, "_select_provider_by_weight", lambda chain: None)
+
+    out = asyncio.run(
+        main_module.ask_chatgpt_cli(
+            "hi",
+            model="gpt-5.4",
+            reasoning_effort="high",
+        )
+    )
+
+    assert out == "ok"
+    assert fake_failover.last["primary"] == "codex"
+    assert fake_failover.last["provider_args"] == {
+        "codex": ["--model", "gpt-5.4", "--reasoning-effort", "high"]
+    }
+
+
+def test_ask_chatgpt_cli_rejects_reasoning_effort_for_unsupported_codex_model():
+    with pytest.raises(ValueError, match="does not support reasoning_effort"):
+        asyncio.run(
+            main_module.ask_chatgpt_cli(
+                "hi",
+                model="gpt-5.1-codex-mini",
+                reasoning_effort="high",
+            )
+        )
+
+
+def test_ask_chatgpt_cli_filters_codex_catalog_by_reasoning_effort(monkeypatch):
+    fake_failover = _TrialSequenceFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(
+        main_module,
+        "_get_config",
+        lambda: {
+            "models": {
+                "codex_model_catalog": ["gpt-5.1-codex-mini", "gpt-5.4", "gpt-5.3-codex"],
+            },
+            "runtime": {
+                "ask_defaults": {
+                    "timeout_seconds": 120,
+                    "max_output_tokens": 0,
+                    "response_format": "text",
+                    "verbosity": "normal",
+                    "stream": False,
+                }
+            },
+        },
+    )
+
+    out = asyncio.run(main_module.ask_chatgpt_cli("hi", reasoning_effort="none"))
+
+    assert out.startswith("[Task Execution Failed]")
+    assert fake_failover.calls == [
+        {"codex": ["--model", "gpt-5.4", "--reasoning-effort", "none"]},
+    ]
+
+
 def test_ask_chatgpt_cli_keeps_codex_primary_even_if_weighted_selector_differs(monkeypatch):
     fake_failover = _CaptureProviderArgsFailover()
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
@@ -281,3 +342,28 @@ def test_ask_gemini_cli_does_not_retry_models_on_non_model_failure(monkeypatch):
 
     assert out.startswith("[Task Execution Failed]")
     assert fake_failover.calls == [{"gemini": ["--model", "gemini-2.5-flash"]}]
+
+
+def test_ask_unified_codex_passes_reasoning_effort(monkeypatch):
+    captured = {}
+
+    async def _fake_dispatch(provider_id, prompt, **kwargs):
+        captured["provider_id"] = provider_id
+        captured["kwargs"] = kwargs
+        return "ok"
+
+    monkeypatch.setattr(main_module, "_dispatch_ask_provider", _fake_dispatch)
+
+    out = asyncio.run(
+        main_module.ask(
+            "hi",
+            provider="codex",
+            model="gpt-5.4",
+            reasoning_effort="low",
+        )
+    )
+
+    assert out == "ok"
+    assert captured["provider_id"] == "codex"
+    assert captured["kwargs"]["model"] == "gpt-5.4"
+    assert captured["kwargs"]["reasoning_effort"] == "low"

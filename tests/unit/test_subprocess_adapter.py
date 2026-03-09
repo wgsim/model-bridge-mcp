@@ -296,6 +296,40 @@ def test_run_places_gemini_prompt_before_model_flag_args():
     assert run_mock.call_args.kwargs["input"] == ""
 
 
+def test_run_rewrites_codex_reasoning_effort_to_config_override():
+    adapter = SubprocessAdapter(
+        {"codex": {"exec": ["codex", "exec", "--skip-git-repo-check"], "health": ["codex", "--version"]}},
+        system_suffix=" [suffix]",
+    )
+    completed = subprocess.CompletedProcess(
+        args=["codex", "exec", "--skip-git-repo-check", "--model", "gpt-5.4"],
+        returncode=0,
+        stdout="ok\n",
+        stderr="",
+    )
+    with patch("shutil.which", return_value="/usr/bin/codex"), patch(
+        "subprocess.run", return_value=completed
+    ) as run_mock:
+        ok, output = adapter.run(
+            "codex",
+            ["--model", "gpt-5.4", "--reasoning-effort", "high"],
+            "hello",
+        )
+
+    assert ok is True
+    assert output == "ok"
+    assert run_mock.call_args.args[0] == [
+        "codex",
+        "exec",
+        "--skip-git-repo-check",
+        "--model",
+        "gpt-5.4",
+        "-c",
+        'model_reasoning_effort="high"',
+    ]
+    assert run_mock.call_args.kwargs["input"] == "hello [suffix]"
+
+
 def test_run_passes_prompt_as_argument_for_claude_p_mode():
     adapter = SubprocessAdapter(
         {"claude_code": {"exec": ["claude", "-p"], "health": ["claude", "--version"]}},
