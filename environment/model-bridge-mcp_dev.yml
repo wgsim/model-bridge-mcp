@@ -64,4 +64,3 @@ dependencies:
       - typing-inspection==0.4.2
       - uvicorn==0.40.0
       - virtualenv==20.36.1
-prefix: /opt/homebrew/Caskroom/miniconda/base/envs/model-bridge-mcp_dev

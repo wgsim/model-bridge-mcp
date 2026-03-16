@@ -6,8 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "model-bridge-mcp"
 version = "0.2.0"
 description = "Modular MCP bridge server for model CLI failover"
-readme = "RELEASE_NOTES.md"
+readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
 dependencies = [
   "mcp",
   "pydantic>=2.0",
