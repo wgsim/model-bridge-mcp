@@ -227,7 +227,7 @@ def _get_plugin_loader() -> PluginLoader | None:
         PLUGIN_LOADER.discover_and_load()
         external_plugins = [
             p for p in PLUGIN_LOADER.list_plugins()
-            if p not in {"codex", "gemini", "ollama", "claude_code"}
+            if p not in {"codex", "gemini", "ollama", "claude_code", "agy"}
         ]
         if external_plugins:
             logger.info("Loaded external plugins: %s", external_plugins)
@@ -246,7 +246,9 @@ def _get_provider_handlers() -> dict[str, Callable]:
         "gemini": ask_gemini_cli,
         "ollama": ask_ollama,
         "claude_code": ask_claude_code,
+        "agy": ask_agy_cli,
     }
+
 
     # Add external plugins (excluding built-ins that wrap the same functions)
     loader = _get_plugin_loader()
@@ -280,8 +282,26 @@ async def _dispatch_ask_provider(
     options: dict,
     output_mode: str,
 ) -> str:
+    # Codex review recommendation: SDK transport & model override validation
+    if provider_id == "agy":
+        if model is not None and model.strip().lower() not in {"default", "auto", ""}:
+            return _finalize_response(
+                "[PROVIDER ERROR] 'agy' does not support model overrides",
+                "agy",
+                options,
+            )
+        config = _get_config()
+        transport_mode = str(config.get("runtime", {}).get("transport_mode", "subprocess")).strip().lower()
+        if transport_mode == "sdk":
+            return _finalize_response(
+                "[PROVIDER ERROR] 'agy' only supports subprocess transport.",
+                "agy",
+                options,
+            )
+
     registry = _get_provider_registry()
     handler = registry.get_handler(provider_id)
+
     if handler is None:
         known = registry.list_provider_ids()
         known_str = "|".join(known)
@@ -778,12 +798,13 @@ def _list_static_provider_models(provider_id: str) -> dict:
     return {
         "configured": _is_provider_configured(provider_id),
         "source": "config",
-        "model_flag": "--model",
+        "model_flag": None if provider_id == "agy" else "--model",
         "catalog": catalog,
         "catalog_count": len(catalog),
         "default_model": default_model,
         "command": commands_cfg.get(provider_id, {}).get("exec", []),
     }
+
 
 
 async def _ask_with_failover(
@@ -811,7 +832,26 @@ async def _ask_with_failover(
     )
     normalized_output_mode = _normalize_output_mode(output_mode)
 
+    if default_primary == "agy":
+        # Codex review recommendation: model override rejection
+        if model is not None and model.strip().lower() not in {"default", "auto", ""}:
+            return _finalize_response(
+                "[PROVIDER ERROR] 'agy' does not support model overrides",
+                "agy",
+                options,
+            )
+        # Codex review recommendation: transport mode validation
+        config = _get_config()
+        transport_mode = str(config.get("runtime", {}).get("transport_mode", "subprocess")).strip().lower()
+        if transport_mode == "sdk":
+            return _finalize_response(
+                "[PROVIDER ERROR] 'agy' only supports subprocess transport.",
+                "agy",
+                options,
+            )
+
     primary_provider = default_primary
+
 
     response = ""
     for trial_model in _build_provider_model_trials(
@@ -1113,6 +1153,83 @@ async def ask_claude_code(
         stream=stream,
         output_mode=output_mode,
     )
+
+
+@mcp.tool()
+async def ask_agy_cli(
+    prompt: str,
+    save_path: str = None,
+    force_model: bool = False,
+    model: str | None = None,
+    timeout_seconds: float | None = None,
+    max_output_tokens: int | None = None,
+    response_format: str | None = None,
+    verbosity: str | None = None,
+    stream: bool | None = None,
+    output_mode: str = "clean",
+) -> str:
+    """Send a prompt to agy CLI with automatic failover support.
+
+    Args:
+        prompt: The text prompt to send.
+        save_path: Optional file path to save the response.
+        force_model: If True, skip failover and only use agy CLI.
+        model: Model override (None, 'default', or 'auto' only for agy).
+        timeout_seconds: Timeout in seconds. Default 300s.
+        max_output_tokens: Limit response tokens.
+        response_format: 'json' for JSON output, None for plain text.
+        verbosity: 'verbose' for extra metadata, None for standard.
+        stream: Reserved for future streaming support.
+        output_mode: 'clean' (default) or 'raw'.
+
+    Returns:
+        Provider response text with routing metadata.
+    """
+    options = _normalize_ask_options(
+        timeout_seconds, max_output_tokens, response_format, verbosity, stream
+    )
+    if model is not None and model.strip().lower() not in {"default", "auto", ""}:
+        return _finalize_response(
+            "[PROVIDER ERROR] 'agy' does not support model overrides",
+            "agy",
+            options,
+        )
+    # Check transport mode.
+    config = _get_config()
+    transport_mode = str(config.get("runtime", {}).get("transport_mode", "subprocess")).strip().lower()
+    if transport_mode == "sdk":
+        return _finalize_response(
+            "[PROVIDER ERROR] 'agy' only supports subprocess transport.",
+            "agy",
+            options,
+        )
+
+    if not _is_provider_configured("agy"):
+        return _finalize_response(
+            "[PROVIDER ERROR] 'agy' is not configured in commands. "
+            "Add commands.agy.exec/health in config to enable it.",
+            "agy",
+            options,
+        )
+    return await _ask_with_failover(
+        prompt,
+        default_primary="agy",
+        secondary=None,
+        mode="analysis",
+        tool_name="ask_agy_cli",
+        weighted_chain_name=None,
+        save_path=save_path,
+        force_model=force_model,
+        model=model,
+        reasoning_effort=None,
+        timeout_seconds=timeout_seconds,
+        max_output_tokens=max_output_tokens,
+        response_format=response_format,
+        verbosity=verbosity,
+        stream=stream,
+        output_mode=output_mode,
+    )
+
 
 
 @mcp.tool()
@@ -1435,20 +1552,21 @@ def list_provider_models(provider: str = "all") -> str:
         JSON with model catalogs and availability per provider.
     """
     normalized = (provider or "all").strip().lower()
-    allowed = {"all", "codex", "gemini", "ollama", "claude_code"}
+    allowed = {"all", "codex", "gemini", "ollama", "claude_code", "agy"}
     if normalized not in allowed:
         return json.dumps(
             {
                 "status": "error",
-                "error": f"Unknown provider '{provider}'. Use one of: all|codex|gemini|ollama|claude_code",
+                "error": f"Unknown provider '{provider}'. Use one of: all|codex|gemini|ollama|claude_code|agy",
             },
             ensure_ascii=False,
         )
 
     if normalized == "all":
-        targets = ["codex", "gemini", "ollama", "claude_code"]
+        targets = ["codex", "gemini", "ollama", "claude_code", "agy"]
     else:
         targets = [normalized]
+
 
     providers_payload: dict[str, dict] = {}
     for target in targets:
@@ -1511,6 +1629,7 @@ def list_cli_noninteractive_policy() -> str:
     codex_exec = commands_cfg.get("codex", {}).get("exec", [])
     gemini_exec = commands_cfg.get("gemini", {}).get("exec", [])
     claude_exec = commands_cfg.get("claude_code", {}).get("exec", [])
+    agy_exec = commands_cfg.get("agy", {}).get("exec", [])
     payload = {
         "status": "ok",
         "providers": {
@@ -1532,8 +1651,16 @@ def list_cli_noninteractive_policy() -> str:
                 "workspace_trust_prompt_skipped_in_print_mode": "-p" in claude_exec
                 or "--print" in claude_exec,
             },
+            "agy": {
+                "configured_exec": agy_exec,
+                "noninteractive_mode": "agy -p/--print",
+                "workspace_trust_prompt_skipped_in_print_mode": True,
+                "documented_workspace_trust_skip_flag": "--dangerously-skip-permissions",
+                "skip_flag_configured": "--dangerously-skip-permissions" in agy_exec,
+            },
         },
     }
+
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -1595,7 +1722,9 @@ _PROVIDER_INSTALL_HINTS = {
     "gemini": "brew install gemini-cli (or npm install -g @anthropic/gemini-cli)",
     "ollama": "brew install --cask ollama (or https://ollama.ai/download)",
     "claude_code": "brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
+    "agy": "Make sure agy CLI is globally installed on your system PATH.",
 }
+
 
 
 def _health_entry_from_sdk_preflight(provider: str, adapter: BaseAdapter) -> dict:
@@ -1611,8 +1740,9 @@ def _health_entry_from_sdk_preflight(provider: str, adapter: BaseAdapter) -> dic
         entry["error"] = f"sdk preflight error: {exc}"
         return entry
     entry["available"] = ok
-    if ok and provider in {"codex", "gemini", "claude_code"}:
+    if ok and provider in {"codex", "gemini", "claude_code", "agy"}:
         entry["auth"] = "configured"
+
     if not ok:
         entry["error"] = message
     return entry
@@ -1642,12 +1772,13 @@ def health_check() -> str:
     transport_mode = str(runtime.get("transport_mode", "subprocess")).strip().lower()
     if transport_mode == "sdk":
         adapter = _get_adapter()
-        for provider in ["codex", "gemini", "ollama", "claude_code"]:
+        for provider in ["codex", "gemini", "ollama", "claude_code", "agy"]:
             providers_status[provider] = _health_entry_from_sdk_preflight(provider, adapter)
     else:
-        for provider in ["codex", "gemini", "ollama", "claude_code"]:
+        for provider in ["codex", "gemini", "ollama", "claude_code", "agy"]:
             cmd_config = commands.get(provider, {})
             health_cmd = cmd_config.get("health", [])
+
             exec_cmd = cmd_config.get("exec", [])
 
             if not health_cmd:

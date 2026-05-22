@@ -36,6 +36,8 @@ class CommandsConfig(BaseModel):
     gemini: ServiceCommand
     ollama: ServiceCommand
     claude_code: ServiceCommand | None = None
+    agy: ServiceCommand | None = None
+
 
 
 class RoutingChains(BaseModel):
@@ -44,6 +46,8 @@ class RoutingChains(BaseModel):
     ask_chatgpt_cli: list[str] = Field(min_length=1)
     ask_gemini_cli: list[str] = Field(min_length=1)
     ask_ollama_cloud_fallback: list[str] = Field(min_length=1)
+    ask_agy_cli: list[str] | None = None
+
 
 
 class WeightedRoutingChains(BaseModel):
@@ -52,6 +56,8 @@ class WeightedRoutingChains(BaseModel):
     ask_chatgpt_cli: list[ProviderRoutingEntry] | None = Field(default=None, min_length=1)
     ask_gemini_cli: list[ProviderRoutingEntry] | None = Field(default=None, min_length=1)
     ask_ollama_cloud_fallback: list[ProviderRoutingEntry] | None = Field(default=None, min_length=1)
+    ask_agy_cli: list[ProviderRoutingEntry] | None = Field(default=None, min_length=1)
+
 
 
 class RoutingConfig(BaseModel):
@@ -70,6 +76,8 @@ class ModelsConfig(BaseModel):
     codex_model_catalog: list[str] = Field(default_factory=list)
     gemini_model_catalog: list[str] = Field(default_factory=list)
     claude_code_model_catalog: list[str] = Field(default_factory=list)
+    agy_model_catalog: list[str] = Field(default_factory=list)
+
 
     @model_validator(mode="after")
     def validate_ollama_model_links(self) -> "ModelsConfig":
@@ -106,6 +114,8 @@ class RuntimeApplySystemSuffix(BaseModel):
     gemini: bool
     ollama: bool
     claude_code: bool = False
+    agy: bool = False
+
 
 
 class AskDefaultsConfig(BaseModel):
@@ -147,7 +157,9 @@ class RuntimeConfig(BaseModel):
         description="Additional environment variables for CLI providers (e.g., GOOGLE_CLOUD_PROJECT)",
     )
     ollama_timeout_seconds: float = Field(default=300.0, gt=0)
+    agy_timeout_seconds: float = Field(default=300.0, gt=0)
     ask_defaults: AskDefaultsConfig = Field(default_factory=AskDefaultsConfig)
+
     prompt_cache_enabled: bool = True
     prompt_cache_ttl_seconds: int = Field(default=300, ge=1)
     prompt_cache_max_entries: int = Field(default=256, ge=1)

@@ -157,3 +157,43 @@ class ClaudeCodePlugin(ProviderPlugin):
             force_model=kwargs.get("force_model", False),
             output_mode=kwargs.get("output_mode", "clean"),
         )
+
+
+@register_provider
+class AgyPlugin(ProviderPlugin):
+    """Plugin wrapper for Agy CLI (ask_agy_cli)."""
+
+    @property
+    def provider_id(self) -> str:
+        return "agy"
+
+    @property
+    def capabilities(self) -> PluginCapabilities:
+        return PluginCapabilities(
+            supports_json=False,
+            supports_stream=False,
+            supports_force_model=False,
+        )
+
+    async def execute(
+        self,
+        prompt: str,
+        model: str | None,
+        options: dict,
+        **kwargs,
+    ) -> str:
+        from model_bridge.main import ask_agy_cli
+
+        return await ask_agy_cli(
+            prompt=prompt,
+            model=model,
+            timeout_seconds=options.get("timeout_seconds"),
+            max_output_tokens=options.get("max_output_tokens"),
+            response_format=options.get("response_format"),
+            verbosity=options.get("verbosity"),
+            stream=options.get("stream"),
+            force_model=kwargs.get("force_model", False),
+            save_path=kwargs.get("save_path"),
+            output_mode=kwargs.get("output_mode", "clean"),
+        )
+
