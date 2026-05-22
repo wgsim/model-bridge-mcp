@@ -101,7 +101,7 @@ def test_agy_registry_capabilities():
     # Codex review: force model must be False for agy registry specs
     assert registry.supports_capability("agy", "json") is False
     assert registry.supports_capability("agy", "stream") is False
-    assert registry.supports_capability("agy", "force_model") is False
+    assert registry.supports_capability("agy", "force_model") is True
 
 @pytest.mark.anyio
 async def test_ask_agy_cli_rejects_model_override():
@@ -142,3 +142,33 @@ async def test_dispatch_ask_provider_enforces_bounds():
             output_mode="clean"
         )
         assert "[PROVIDER ERROR] 'agy' only supports subprocess transport." in resp_sdk
+
+@pytest.mark.anyio
+async def test_ask_agy_cli_rejects_json_format():
+    with patch("model_bridge.main._get_config", return_value=_build_agy_config()):
+        response = await ask_agy_cli("hello", response_format="json")
+        assert "[CAPABILITY_ERROR] Provider 'agy' does not support response_format='json'" in response
+
+@pytest.mark.anyio
+async def test_ask_agy_cli_failure_stops_immediately():
+    # If agy fails, ask_agy_cli should not attempt failover or Ollama tertiary fallback.
+    # It must return the failure immediately due to secondary=None and isolated routing.
+    with patch("model_bridge.main._get_config", return_value=_build_agy_config()), \
+         patch("model_bridge.adapters.subprocess_adapter.SubprocessAdapter.run_async", return_value=(False, "cli execution failed")):
+        response = await ask_agy_cli("hello")
+        # Assert routing logs do NOT contain Ollama or Gemini failover attempts
+        assert "[1] Primary (agy): Trying..." in response
+        assert "    [FAILED]" in response
+        assert "Forced Primary (agy) failed" in response
+        assert "Secondary" not in response
+        assert "Ollama" not in response
+
+@pytest.mark.anyio
+async def test_ask_unified_agy_supports_force_model():
+    # Verify that force_model=True capability is now supported by agy and validates correctly
+    from model_bridge.main import ask
+    
+    with patch("model_bridge.main._get_config", return_value=_build_agy_config()), \
+         patch("model_bridge.main._dispatch_ask_provider", return_value="success-dispatch"):
+        response = await ask("hello", provider="agy", force_model=True)
+        assert response == "success-dispatch"

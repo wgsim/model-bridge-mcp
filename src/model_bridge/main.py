@@ -833,6 +833,15 @@ async def _ask_with_failover(
     normalized_output_mode = _normalize_output_mode(output_mode)
 
     if default_primary == "agy":
+        # Check JSON response capability
+        registry = _get_provider_registry()
+        _, json_error = registry.validate_option("agy", "response_format", options["response_format"])
+        if json_error:
+            return _finalize_response(
+                json_error,
+                "agy",
+                options,
+            )
         # Codex review recommendation: model override rejection
         if model is not None and model.strip().lower() not in {"default", "auto", ""}:
             return _finalize_response(
@@ -875,8 +884,8 @@ async def _ask_with_failover(
             secondary,
             prompt,
             mode,
-            force_primary=force_model,
-            allow_tertiary=True,
+            force_primary=force_model or (secondary is None),
+            allow_tertiary=False if secondary is None else True,
             timeout_seconds=options["timeout_seconds"],
             provider_args=provider_args,
             output_mode=normalized_output_mode,
@@ -1188,6 +1197,15 @@ async def ask_agy_cli(
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
+    # Check JSON response capability
+    registry = _get_provider_registry()
+    _, json_error = registry.validate_option("agy", "response_format", options["response_format"])
+    if json_error:
+        return _finalize_response(
+            json_error,
+            "agy",
+            options,
+        )
     if model is not None and model.strip().lower() not in {"default", "auto", ""}:
         return _finalize_response(
             "[PROVIDER ERROR] 'agy' does not support model overrides",

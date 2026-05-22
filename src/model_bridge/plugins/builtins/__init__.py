@@ -172,7 +172,7 @@ class AgyPlugin(ProviderPlugin):
         return PluginCapabilities(
             supports_json=False,
             supports_stream=False,
-            supports_force_model=False,
+            supports_force_model=True,
         )
 
     async def execute(

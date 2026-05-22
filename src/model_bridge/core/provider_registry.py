@@ -110,7 +110,7 @@ def build_default_provider_registry(
             supports_json=True, supports_stream=False, supports_force_model=True
         ),
         "agy": ProviderCapabilities(
-            supports_json=False, supports_stream=False, supports_force_model=False
+            supports_json=False, supports_stream=False, supports_force_model=True
         ),
     }
     for provider_id, capabilities in defaults.items():
