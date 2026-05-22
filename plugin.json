@@ -1,0 +1,5 @@
+{
+  "name": "model-bridge-mcp",
+  "version": "1.0.0",
+  "description": "Local Model Bridge MCP Server for failover orchestration"
+}
