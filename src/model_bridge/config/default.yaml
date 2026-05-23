@@ -80,6 +80,8 @@ models:
     - "haiku"
     - "sonnet"
     - "opus"
+  # Note: For the agy CLI, 'default' is a virtual placeholder to satisfy MCP schema requirements,
+  # as the agy CLI executes in a model-less autonomous agentic mode and does not support model overrides.
   agy_model_catalog:
     - "default"
 

@@ -282,22 +282,6 @@ async def _dispatch_ask_provider(
     options: dict,
     output_mode: str,
 ) -> str:
-    # Codex review recommendation: SDK transport & model override validation
-    if provider_id == "agy":
-        if model is not None and model.strip().lower() not in {"default", "auto", ""}:
-            return _finalize_response(
-                "[PROVIDER ERROR] 'agy' does not support model overrides",
-                "agy",
-                options,
-            )
-        config = _get_config()
-        transport_mode = str(config.get("runtime", {}).get("transport_mode", "subprocess")).strip().lower()
-        if transport_mode == "sdk":
-            return _finalize_response(
-                "[PROVIDER ERROR] 'agy' only supports subprocess transport.",
-                "agy",
-                options,
-            )
 
     registry = _get_provider_registry()
     handler = registry.get_handler(provider_id)
@@ -790,6 +774,10 @@ def _build_provider_model_trials(
 
 
 def _list_static_provider_models(provider_id: str) -> dict:
+    # Note: For the 'agy' provider, the model catalog is defined as ["default"].
+    # This is a virtual placeholder to satisfy model list schema requirements in MCP clients,
+    # as the underlying Go-based agy CLI executes in a model-less autonomous agentic mode
+    # and does not support or parse any model name parameters or --model flag arguments.
     models_cfg = _get_config()["models"]
     commands_cfg = _get_config()["commands"]
     catalog_key = f"{provider_id}_model_catalog"
@@ -1197,31 +1185,6 @@ async def ask_agy_cli(
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
-    # Check JSON response capability
-    registry = _get_provider_registry()
-    _, json_error = registry.validate_option("agy", "response_format", options["response_format"])
-    if json_error:
-        return _finalize_response(
-            json_error,
-            "agy",
-            options,
-        )
-    if model is not None and model.strip().lower() not in {"default", "auto", ""}:
-        return _finalize_response(
-            "[PROVIDER ERROR] 'agy' does not support model overrides",
-            "agy",
-            options,
-        )
-    # Check transport mode.
-    config = _get_config()
-    transport_mode = str(config.get("runtime", {}).get("transport_mode", "subprocess")).strip().lower()
-    if transport_mode == "sdk":
-        return _finalize_response(
-            "[PROVIDER ERROR] 'agy' only supports subprocess transport.",
-            "agy",
-            options,
-        )
-
     if not _is_provider_configured("agy"):
         return _finalize_response(
             "[PROVIDER ERROR] 'agy' is not configured in commands. "
