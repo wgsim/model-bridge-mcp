@@ -48,8 +48,8 @@ def test_agy_subprocess_argument_ordering_and_warning_log():
     assert output == "agy-run-success"
     run_mock.assert_called_once()
     called_cmd = run_mock.call_args.args[0]
-    # Check flag order: boolean flags first, positional prompt last
-    assert called_cmd == ["agy", "-p", "--dangerously-skip-permissions", "what is 1+1"]
+    # Check flag order: prompt immediately after print flag, boolean flags last
+    assert called_cmd == ["agy", "-p", "what is 1+1", "--dangerously-skip-permissions"]
     
     # Assert Codex recommendation: runtime warning for skip permissions was emitted
     warn_mock.assert_called_once()

@@ -544,8 +544,10 @@ class SubprocessAdapter(CLIAdapter):
         stdin_input = full_input
         # agy execution details
         if service_name == "agy":
-            if any(flag in cmd_base for flag in ("-p", "--print")):
-                full_cmd = full_cmd + [full_input]
+            if any(flag in cmd_base for flag in ("-p", "--print", "--prompt")):
+                prompt_flag = next(flag for flag in ("-p", "--print", "--prompt") if flag in cmd_base)
+                idx = full_cmd.index(prompt_flag)
+                full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
                 stdin_input = ""
             if "--dangerously-skip-permissions" in full_cmd:
                 logger.warning(
