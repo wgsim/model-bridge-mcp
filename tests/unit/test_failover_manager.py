@@ -1,4 +1,5 @@
 import asyncio
+import pytest
 
 from model_bridge.core.failover_manager import FailoverManager
 
@@ -225,3 +226,42 @@ def test_execute_async_raw_mode_disables_noise_stripping():
 
     assert "ok" in out
     assert adapter.flags == [False]
+
+
+@pytest.mark.anyio
+async def test_ask_with_failover_isolates_agy_on_sdk_transport(monkeypatch):
+    from model_bridge import main as main_module
+    config = {
+        "commands": {},
+        "runtime": {
+            "transport_mode": "sdk",
+            "subprocess_timeout_seconds": 120,
+            "ollama_timeout_seconds": 300,
+            "system_suffix": "",
+        },
+        "models": {
+            "agy_model_catalog": ["default"],
+        }
+    }
+    monkeypatch.setattr(main_module, "_get_config", lambda: config)
+    
+    out = await main_module._ask_with_failover(
+        "hello",
+        default_primary="agy",
+        secondary="gemini",
+        mode="analysis",
+        tool_name="ask_agy_cli",
+        weighted_chain_name=None,
+        save_path=None,
+        force_model=False,
+        model=None,
+        reasoning_effort=None,
+        timeout_seconds=None,
+        max_output_tokens=None,
+        response_format=None,
+        verbosity=None,
+        stream=None,
+        output_mode="clean",
+    )
+    assert "[PROVIDER ERROR] 'agy' only supports subprocess transport." in out
+

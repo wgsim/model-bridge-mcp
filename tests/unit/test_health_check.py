@@ -149,7 +149,7 @@ class TestHealthCheck:
         payload = json.loads(result)
 
         assert payload["status"] == "degraded"
-        for provider in ["codex", "gemini", "ollama", "claude_code"]:
+        for provider in ["codex", "gemini", "ollama", "claude_code", "agy"]:
             assert provider in payload["providers"]
             assert payload["providers"][provider]["available"] is False
             assert payload["providers"][provider].get("error") == "not configured"
@@ -174,7 +174,7 @@ class TestHealthCheck:
         # At least some unconfigured providers should have install hints
         has_hint = any(
             "install_hint" in payload["providers"].get(p, {})
-            for p in ["codex", "gemini", "ollama", "claude_code"]
+            for p in ["codex", "gemini", "ollama", "claude_code", "agy"]
         )
         assert has_hint
 
@@ -286,7 +286,7 @@ class TestHealthCheck:
         assert payload["providers"]["codex"]["auth"] == "configured"
         assert payload["providers"]["ollama"]["available"] is False
         assert payload["providers"]["ollama"]["error"] == "ollama offline"
-        assert adapter.calls == ["codex", "gemini", "ollama", "claude_code"]
+        assert adapter.calls == ["codex", "gemini", "ollama", "claude_code", "agy"]
 
     def test_health_check_sdk_mode_degraded_when_auth_missing(self, monkeypatch):
         monkeypatch.setattr(

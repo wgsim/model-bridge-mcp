@@ -1,6 +1,6 @@
 commands:
   codex:
-    exec: ["codex", "exec", "--skip-git-repo-check"]
+    exec: ["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"]
     health: ["codex", "--version"]
   gemini:
     exec: ["gemini", "-p"]
@@ -9,14 +9,20 @@ commands:
     exec: ["ollama", "run"]
     health: ["ollama", "--version"]
   claude_code:
-    exec: ["claude", "-p"]
+    exec: ["claude", "-p", "--dangerously-skip-permissions"]
     health: ["claude", "--version"]
+  agy:
+    exec: ["agy", "-p", "--dangerously-skip-permissions"]
+    health: ["agy", "--version"]
+
 
 routing:
   default_chains:
     ask_chatgpt_cli: ["codex", "gemini", "ollama"]
     ask_gemini_cli: ["gemini", "codex", "ollama"]
     ask_ollama_cloud_fallback: ["codex", "gemini"]
+    ask_agy_cli: ["agy"]
+
   # Weighted routing chains (P2-1: Matrix Switching)
   # Higher weight = more traffic (1-100 scale)
   weighted_chains:
@@ -37,6 +43,10 @@ routing:
         weight: 100
       - provider: "gemini"
         weight: 50
+    ask_agy_cli:
+      - provider: "agy"
+        weight: 100
+
 
 models:
   ollama_default_model: "gpt-oss:20b"
@@ -70,6 +80,10 @@ models:
     - "haiku"
     - "sonnet"
     - "opus"
+  # Note: For the agy CLI, 'default' is a virtual placeholder to satisfy MCP schema requirements,
+  # as the agy CLI executes in a model-less autonomous agentic mode and does not support model overrides.
+  agy_model_catalog:
+    - "default"
 
 security:
   block_patterns:
@@ -90,6 +104,8 @@ runtime:
   transport_mode: "subprocess"
   subprocess_timeout_seconds: 120
   ollama_timeout_seconds: 300
+  agy_timeout_seconds: 300
+
   # Additional PATH directories for CLI discovery (highest priority)
   # Useful when CLIs are installed in non-standard locations
   # Example: extra_path: ["~/custom/bin", "/opt/tools/bin"]
@@ -131,3 +147,5 @@ runtime:
     gemini: true
     ollama: false
     claude_code: true
+    agy: false
+

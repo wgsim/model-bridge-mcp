@@ -82,6 +82,26 @@ def test_ask_unified_routes_to_claude_code(monkeypatch):
     assert out == "claude-code-result"
 
 
+async def _fake_agy(*args, **kwargs):
+    return "agy-result"
+
+
+def test_ask_unified_routes_to_agy(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "_get_provider_handlers",
+        lambda: {
+            "codex": _fake_codex,
+            "gemini": _fake_gemini,
+            "ollama": _fake_ollama,
+            "claude_code": _fake_claude_code,
+            "agy": _fake_agy,
+        },
+    )
+    out = asyncio.run(main_module.ask("hello", provider="agy"))
+    assert out == "agy-result"
+
+
 def test_ask_unified_forwards_model_to_codex_provider(monkeypatch):
     captured = {}
 

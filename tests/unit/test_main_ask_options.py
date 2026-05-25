@@ -382,7 +382,8 @@ def test_ask_claude_code_passes_reasoning_effort_to_primary_provider(monkeypatch
     }
 
 
-def test_ask_claude_code_rejects_reasoning_effort_for_haiku():
+def test_ask_claude_code_rejects_reasoning_effort_for_haiku(monkeypatch):
+    monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
     with pytest.raises(ValueError, match="does not support reasoning_effort"):
         asyncio.run(
             main_module.ask_claude_code(
@@ -393,7 +394,8 @@ def test_ask_claude_code_rejects_reasoning_effort_for_haiku():
         )
 
 
-def test_ask_claude_code_rejects_max_reasoning_effort_for_sonnet():
+def test_ask_claude_code_rejects_max_reasoning_effort_for_sonnet(monkeypatch):
+    monkeypatch.setattr(main_module, "_is_provider_configured", lambda provider_id: True)
     with pytest.raises(ValueError, match="does not support reasoning_effort='max'"):
         asyncio.run(
             main_module.ask_claude_code(

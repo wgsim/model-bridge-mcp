@@ -10,3 +10,8 @@ dist/
 .worktrees/
 .hypothesis/
 .DS_Store
+
+# Local diagnostic and agent untracked files
+scratch/
+.hgp/
+uv.lock

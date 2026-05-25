@@ -10,6 +10,7 @@ def _fake_config():
             "gemini": {"exec": ["gemini", "-p"]},
             "ollama": {"exec": ["ollama", "run"]},
             "claude_code": {"exec": ["claude", "-p"]},
+            "agy": {"exec": ["agy", "-p", "--dangerously-skip-permissions"]},
         },
         "models": {
             "ollama_default_model": "gpt-oss:20b",
@@ -20,6 +21,7 @@ def _fake_config():
             "codex_model_catalog": ["gpt-5.4", "gpt-5.3-codex"],
             "gemini_model_catalog": ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"],
             "claude_code_model_catalog": ["sonnet"],
+            "agy_model_catalog": ["default"],
         },
     }
 
@@ -32,12 +34,14 @@ def test_list_provider_models_all_returns_mixed_dynamic_and_static(monkeypatch):
     payload = json.loads(main_module.list_provider_models("all"))
 
     assert payload["status"] == "ok"
-    assert set(payload["providers"].keys()) == {"codex", "gemini", "ollama", "claude_code"}
+    assert set(payload["providers"].keys()) == {"codex", "gemini", "ollama", "claude_code", "agy"}
     assert payload["providers"]["codex"]["catalog"] == ["gpt-5.4", "gpt-5.3-codex"]
     assert payload["providers"]["codex"]["default_model"] == "gpt-5.4"
     assert payload["providers"]["gemini"]["catalog"] == ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
     assert payload["providers"]["gemini"]["default_model"] == "gemini-3.1-pro-preview"
     assert payload["providers"]["claude_code"]["catalog"] == ["sonnet"]
+    assert payload["providers"]["agy"]["catalog"] == ["default"]
+    assert payload["providers"]["agy"]["model_flag"] is None
     assert payload["providers"]["ollama"]["status"] == "ok"
 
 

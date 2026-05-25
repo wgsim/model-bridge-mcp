@@ -60,13 +60,16 @@ def test_load_config_from_default_succeeds():
     assert "security" in config
     assert "runtime" in config
     assert config["runtime"]["apply_system_suffix"]["ollama"] is False
+    assert config["runtime"]["apply_system_suffix"]["agy"] is False
     assert config["runtime"]["ollama_timeout_seconds"] > 0
+    assert config["runtime"]["agy_timeout_seconds"] == 300.0
     assert "ollama_catalog" in config["models"]
     assert "ollama_aliases" in config["models"]
     assert "ollama_local_fallback_chain" in config["models"]
     assert "codex_model_catalog" in config["models"]
     assert "gemini_model_catalog" in config["models"]
     assert "claude_code_model_catalog" in config["models"]
+    assert "agy_model_catalog" in config["models"]
     assert "ollama_resource_guard_enabled" in config["runtime"]
     assert "ollama_model_memory_gb" in config["runtime"]
     assert config["runtime"]["transport_mode"] == "subprocess"

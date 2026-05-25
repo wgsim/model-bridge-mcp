@@ -28,7 +28,9 @@ INSTALL_HINTS: dict[str, str] = {
     "ollama": "brew install --cask ollama (or https://ollama.ai/download)",
     "claude": "brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
     "claude_code": "brew install --cask claude-code (or npm install -g @anthropic/claude-code)",
+    "agy": "Make sure agy CLI is globally installed on your system PATH.",
 }
+
 
 # Shells to try for login shell discovery (in order of preference)
 _LOGIN_SHELLS = ["bash", "zsh", "sh"]
@@ -322,12 +324,15 @@ class SubprocessAdapter(CLIAdapter):
         timeout_seconds: float | None = None,
         extra_path: Sequence[str] | None = None,
         extra_env_vars: Mapping[str, str] | None = None,
+        agy_timeout_seconds: float | None = None,
     ) -> None:
         self.cli_config = cli_config
         self.env = dict(env) if env is not None else os.environ.copy()
         self.system_suffix = system_suffix
         self.apply_system_suffix_for = dict(apply_system_suffix_for or {})
         self.timeout_seconds = timeout_seconds
+        self.agy_timeout_seconds = agy_timeout_seconds
+
         self._preflight_cache: dict[str, tuple[bool, str, float]] = {}
         self._reasoning_probe_cache: dict[tuple[str, str, str], tuple[str, str, float]] = {}
         self._extra_path = list(extra_path) if extra_path else None
@@ -537,8 +542,21 @@ class SubprocessAdapter(CLIAdapter):
                 return False, err, [], ""
         full_cmd = cmd_base + rewritten_args
         stdin_input = full_input
+        # agy execution details
+        if service_name == "agy":
+            if any(flag in cmd_base for flag in ("-p", "--print", "--prompt")):
+                prompt_flag = next(flag for flag in ("-p", "--print", "--prompt") if flag in cmd_base)
+                idx = full_cmd.index(prompt_flag)
+                full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
+                stdin_input = ""
+            if "--dangerously-skip-permissions" in full_cmd:
+                logger.warning(
+                    "[WARNING] 'agy' provider is running with '--dangerously-skip-permissions', "
+                    "allowing autonomous sub-tasks and tool executions without confirmation. "
+                    "Monitor execution to prevent unintended workspace actions and token costs."
+                )
         # Gemini expects prompt value immediately after -p/--prompt.
-        if service_name == "gemini" and any(flag in cmd_base for flag in ("-p", "--prompt")):
+        elif service_name == "gemini" and any(flag in cmd_base for flag in ("-p", "--prompt")):
             prompt_flag = "-p" if "-p" in cmd_base else "--prompt"
             idx = full_cmd.index(prompt_flag)
             full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
@@ -550,6 +568,7 @@ class SubprocessAdapter(CLIAdapter):
             full_cmd = full_cmd + [full_input]
             stdin_input = ""
         return True, "", full_cmd, stdin_input
+
 
     @staticmethod
     def _rewrite_codex_args(args: Sequence[str]) -> tuple[bool, str, list[str]]:
@@ -654,8 +673,14 @@ class SubprocessAdapter(CLIAdapter):
         ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
         if not ok:
             return False, err
-        effective_timeout = timeout_seconds if timeout_seconds is not None else self.timeout_seconds
+        effective_timeout = timeout_seconds
+        if effective_timeout is None:
+            if service_name == "agy" and self.agy_timeout_seconds is not None:
+                effective_timeout = self.agy_timeout_seconds
+            else:
+                effective_timeout = self.timeout_seconds
         try:
+
             result = subprocess.run(
                 full_cmd,
                 capture_output=True,
@@ -697,8 +722,14 @@ class SubprocessAdapter(CLIAdapter):
         ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
         if not ok:
             return False, err
-        effective_timeout = timeout_seconds if timeout_seconds is not None else self.timeout_seconds
+        effective_timeout = timeout_seconds
+        if effective_timeout is None:
+            if service_name == "agy" and self.agy_timeout_seconds is not None:
+                effective_timeout = self.agy_timeout_seconds
+            else:
+                effective_timeout = self.timeout_seconds
         try:
+
             proc = await asyncio.create_subprocess_exec(
                 *full_cmd,
                 stdin=asyncio.subprocess.PIPE,

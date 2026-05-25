@@ -39,6 +39,7 @@ def build_adapter(
             timeout_seconds=runtime.get("subprocess_timeout_seconds"),
             extra_path=extra_path,
             extra_env_vars=extra_env_vars,
+            agy_timeout_seconds=runtime.get("agy_timeout_seconds"),
         )
 
     raise ValueError(f"Unsupported runtime.transport_mode: {mode}")

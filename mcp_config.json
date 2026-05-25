@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "model-bridge-mcp": {
+      "command": "/opt/homebrew/Caskroom/miniconda/base/envs/model-bridge-mcp_dev/bin/python",
+      "args": [
+        "-m",
+        "model_bridge.main"
+      ],
+      "cwd": "/Users/woogwangsim/AI_development/model-bridge-mcp",
+      "env": {
+        "PYTHONPATH": "/Users/woogwangsim/AI_development/model-bridge-mcp/src"
+      }
+    }
+  }
+}

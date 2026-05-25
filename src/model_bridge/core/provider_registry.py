@@ -109,6 +109,9 @@ def build_default_provider_registry(
         "claude_code": ProviderCapabilities(
             supports_json=True, supports_stream=False, supports_force_model=True
         ),
+        "agy": ProviderCapabilities(
+            supports_json=False, supports_stream=False, supports_force_model=True
+        ),
     }
     for provider_id, capabilities in defaults.items():
         handler = handlers.get(provider_id) if handlers else None
