@@ -399,7 +399,7 @@ class SubprocessAdapter(CLIAdapter):
             self._preflight_cache[service_name] = (*result, now)
             return result
 
-        if not shutil.which(cmd_base[0]):
+        if not shutil.which(cmd_base[0], path=self.env.get("PATH")):
             hint = INSTALL_HINTS.get(cmd_base[0], "")
             hint_suffix = f" Install: {hint}" if hint else ""
             result = (False, f"Command '{cmd_base[0]}' not found.{hint_suffix}")
@@ -410,7 +410,11 @@ class SubprocessAdapter(CLIAdapter):
         if health_cmd:
             try:
                 proc = subprocess.run(
-                    health_cmd, capture_output=True, timeout=5, check=False
+                    health_cmd,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                    env=self.env,
                 )
                 if proc.returncode != 0:
                     result = (

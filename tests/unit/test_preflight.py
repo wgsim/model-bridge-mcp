@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from unittest.mock import patch
 
-from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
+from model_bridge.adapters.subprocess_adapter import (
+    SubprocessAdapter,
+    _discover_provider_env_vars,
+)
 
 
 def _build_config():
@@ -102,3 +106,52 @@ class TestPreflightCheck:
             ok, msg = adapter.preflight_check("ollama")
         assert ok is False
         assert "Install:" in msg or "brew" in msg.lower() or "ollama" in msg.lower()
+
+    def test_preflight_uses_adapter_path_for_cli_lookup(self):
+        adapter = SubprocessAdapter(_build_config(), env={"PATH": "/usr/bin"})
+        adapter.env["PATH"] = "/opt/custom/bin:/usr/bin"
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
+
+        def fake_which(command, path=None):
+            assert command == "ollama"
+            assert path == adapter.env["PATH"]
+            return "/opt/custom/bin/ollama"
+
+        with patch("shutil.which", side_effect=fake_which), patch(
+            "subprocess.run", return_value=completed
+        ):
+            ok, msg = adapter.preflight_check("ollama")
+
+        assert ok is True
+        assert msg == "ok"
+
+    def test_preflight_passes_adapter_env_to_health_check(self):
+        adapter = SubprocessAdapter(
+            _build_config(),
+            env={"PATH": "/usr/bin", "OPENAI_API_KEY": "token-from-adapter"},
+        )
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
+
+        def fake_run(*args, **kwargs):
+            assert kwargs["env"] == adapter.env
+            return completed
+
+        with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
+            "subprocess.run", side_effect=fake_run
+        ):
+            ok, msg = adapter.preflight_check("ollama")
+
+        assert ok is True
+        assert msg == "ok"
+
+
+def test_discover_provider_env_vars_collects_multiple_values():
+    with patch.dict(
+        os.environ,
+        {"GOOGLE_API_KEY": "google-token", "OPENAI_API_KEY": "openai-token"},
+        clear=False,
+    ):
+        discovered = _discover_provider_env_vars(timeout=1.0)
+
+    assert discovered["GOOGLE_API_KEY"] == "google-token"
+    assert discovered["OPENAI_API_KEY"] == "openai-token"

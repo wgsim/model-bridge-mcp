@@ -63,6 +63,7 @@ def test_load_config_from_default_succeeds():
     assert config["runtime"]["apply_system_suffix"]["agy"] is False
     assert config["runtime"]["ollama_timeout_seconds"] > 0
     assert config["runtime"]["agy_timeout_seconds"] == 300.0
+    assert "--dangerously-skip-permissions" not in config["commands"]["agy"]["exec"]
     assert "ollama_catalog" in config["models"]
     assert "ollama_aliases" in config["models"]
     assert "ollama_local_fallback_chain" in config["models"]

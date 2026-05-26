@@ -12,7 +12,7 @@ commands:
     exec: ["claude", "-p", "--dangerously-skip-permissions"]
     health: ["claude", "--version"]
   agy:
-    exec: ["agy", "-p", "--dangerously-skip-permissions"]
+    exec: ["agy", "-p"]
     health: ["agy", "--version"]
 
 
