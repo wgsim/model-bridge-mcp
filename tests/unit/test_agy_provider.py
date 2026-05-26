@@ -154,6 +154,7 @@ async def test_ask_agy_cli_failure_stops_immediately():
     # If agy fails, ask_agy_cli should not attempt failover or Ollama tertiary fallback.
     # It must return the failure immediately due to secondary=None and isolated routing.
     with patch("model_bridge.main._get_config", return_value=_build_agy_config()), \
+         patch("model_bridge.adapters.subprocess_adapter.SubprocessAdapter.preflight_check", return_value=(True, "")), \
          patch("model_bridge.adapters.subprocess_adapter.SubprocessAdapter.run_async", return_value=(False, "cli execution failed")):
         response = await ask_agy_cli("hello")
         # Assert routing logs do NOT contain Ollama or Gemini failover attempts
