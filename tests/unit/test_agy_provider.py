@@ -25,7 +25,7 @@ def _build_agy_config():
     }
 
 def test_agy_subprocess_argument_ordering_and_warning_log():
-    # agy expects prompt as trailing positional argument when running non-interactively
+    # agy expects prompt immediately after print flag when running non-interactively
     adapter = SubprocessAdapter(
         _build_agy_config()["commands"],
         timeout_seconds=120.0,
