@@ -91,6 +91,17 @@ def test_save_to_file_rejects_parent_traversal(tmp_path: Path, monkeypatch):
     out = save_to_file("hello", "../escape.txt")
 
     assert out.startswith("[SECURITY ERROR]")
+
+
+def test_save_to_file_rejects_symlinked_output_root(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    model_bridge_dir = tmp_path / ".model_bridge"
+    model_bridge_dir.mkdir()
+    (model_bridge_dir / "outputs").symlink_to(tmp_path / "elsewhere")
+
+    out = save_to_file("hello", "reports/result.txt")
+
+    assert out.startswith("[SECURITY ERROR]")
 ```
 
 - [ ] **Step 2: Run the targeted test file and verify the new tests fail for the expected reason**
@@ -119,7 +130,12 @@ def _resolve_safe_output_path(path: str, output_root: str = SAFE_OUTPUT_DIR) -> 
     if normalized in {".", ""} or normalized.startswith(".."):
         return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
 
-    root = os.path.realpath(output_root)
+    root_base = os.path.abspath(output_root)
+    if os.path.lexists(root_base) and os.path.islink(root_base):
+        return None, f"[SECURITY ERROR] Output root '{output_root}' must not be a symlink."
+    os.makedirs(root_base, exist_ok=True)
+    root = os.path.realpath(root_base)
+
     full_path = os.path.realpath(os.path.join(root, normalized))
     if full_path != root and not full_path.startswith(root + os.sep):
         return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
@@ -223,7 +239,6 @@ commands:
     health: ["agy", "--version"]
 ```
 
-```markdown
 ### Local opt-in for dangerous provider flags
 
 If you intentionally want approval-bypass flags for local experimentation, set them only in `~/.model_bridge/local.yaml`:
@@ -236,7 +251,6 @@ commands:
     exec: ["claude", "-p", "--dangerously-skip-permissions"]
   agy:
     exec: ["agy", "-p", "--dangerously-skip-permissions"]
-```
 ```
 
 - [ ] **Step 4: Update tests that intentionally cover dangerous flags so they use explicit test fixtures, not shipped defaults**
@@ -289,20 +303,22 @@ git commit -m "fix: remove dangerous provider flags from shipped defaults"
 - [ ] **Step 1: Write the failing tests for opt-in debug-meta logging and broader masking**
 
 ```python
-def test_save_if_requested_skips_debug_meta_when_disabled(tmp_path: Path):
+def test_save_if_requested_skips_debug_meta_when_disabled(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     response = "body\n\n--- [Routing Log] ---\nAuthorization: Bearer SECRET_TOKEN"
-    target = tmp_path / "result.txt"
+    target = "result.txt"
     debug_dir = tmp_path / ".tmp-debug"
 
     out = _save_if_requested(
         response,
-        str(target),
+        target,
         tool_name="ask_chatgpt_cli",
         debug_dir=str(debug_dir),
         save_debug_meta=False,
     )
 
-    assert target.read_text(encoding="utf-8") == "body"
+    saved = tmp_path / ".model_bridge" / "outputs" / "result.txt"
+    assert saved.read_text(encoding="utf-8") == "body"
     assert list(debug_dir.glob("*.meta.log")) == []
     assert "[DEBUG META]" not in out
 
@@ -455,12 +471,11 @@ Expected:
 
 - [ ] **Step 3: Re-run the dedicated security review after the code lands**
 
-Run:
-```bash
-/goal /cross-audit-review 사이클로 이슈 없이 수렴시켜줘.
-```
+Operator workflow in Claude Code:
+- Run `/cross-audit-review` after the commits above land.
+- If the review reports new P1/P2 issues in this security-first scope, fix them before moving on.
 
-Then run the repo’s cross-audit workflow again after the commits above. Expected:
+Expected:
 - no new P1/P2 findings on the security-first slice
 - any remaining issues should belong to the separate runtime-consistency or architecture plans, not this plan’s scope
 
