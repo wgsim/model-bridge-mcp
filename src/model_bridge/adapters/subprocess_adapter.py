@@ -523,7 +523,7 @@ class SubprocessAdapter(CLIAdapter):
         cmd_base = list(config.get("exec", []))
         if not cmd_base:
             return False, f"Configuration Error: No command defined for {service_name}", [], ""
-        if not shutil.which(cmd_base[0]):
+        if not shutil.which(cmd_base[0], path=self.env.get("PATH")):
             hint = INSTALL_HINTS.get(cmd_base[0], "")
             hint_suffix = f" Install: {hint}" if hint else ""
             return False, f"System Error: Command '{cmd_base[0]}' not found.{hint_suffix}", [], ""

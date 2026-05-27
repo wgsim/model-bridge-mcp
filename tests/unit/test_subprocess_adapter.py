@@ -78,6 +78,31 @@ def test_run_returns_combined_output_on_nonzero_exit():
     assert output == "partial out\nfailure"
 
 
+def test_run_uses_adapter_path_for_command_lookup():
+    adapter = SubprocessAdapter(_build_config(), env={"PATH": "/usr/bin"})
+    adapter.env["PATH"] = "/opt/custom/bin:/usr/bin"
+    completed = subprocess.CompletedProcess(
+        args=["ollama", "run"],
+        returncode=0,
+        stdout="ok-output\n",
+        stderr="",
+    )
+
+    def fake_which(command, path=None):
+        assert command == "ollama"
+        assert path == adapter.env["PATH"]
+        return "/opt/custom/bin/ollama"
+
+    with patch("shutil.which", side_effect=fake_which), patch(
+        "subprocess.run", return_value=completed
+    ) as run_mock:
+        ok, output = adapter.run("ollama", ["llama3.2"], "hello")
+
+    assert ok is True
+    assert output == "ok-output"
+    assert run_mock.call_args.args[0] == ["ollama", "run", "llama3.2"]
+
+
 def test_run_handles_subprocess_exception():
     adapter = SubprocessAdapter(_build_config())
     with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
@@ -137,6 +162,34 @@ def test_run_async_returns_combined_output_on_nonzero_exit():
 
     assert ok is False
     assert output == "partial async\nasync fail"
+
+
+def test_run_async_uses_adapter_path_for_command_lookup():
+    adapter = SubprocessAdapter(_build_config(), env={"PATH": "/usr/bin"})
+    adapter.env["PATH"] = "/opt/custom/bin:/usr/bin"
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self, input=None):
+            assert input == b"hello"
+            return b"async-ok\n", b""
+
+    def fake_which(command, path=None):
+        assert command == "ollama"
+        assert path == adapter.env["PATH"]
+        return "/opt/custom/bin/ollama"
+
+    async def _fake_exec(*args, **kwargs):
+        return _Proc()
+
+    with patch("shutil.which", side_effect=fake_which), patch(
+        "asyncio.create_subprocess_exec", side_effect=_fake_exec
+    ):
+        ok, output = asyncio.run(adapter.run_async("ollama", ["llama3.2"], "hello"))
+
+    assert ok is True
+    assert output == "async-ok"
 
 
 def test_run_skips_suffix_when_service_flag_is_false():
