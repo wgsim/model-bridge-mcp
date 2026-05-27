@@ -56,18 +56,18 @@ def test_save_if_requested_masks_sensitive_text_in_meta(tmp_path: Path):
     assert "***MASKED***" in meta_text
 
 
-def test_save_to_file_blocks_relative_symlink_escape_from_output_root(tmp_path: Path, monkeypatch):
+def test_save_to_file_blocks_symlink_path_resolving_to_system_dir(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    outside = tmp_path / "elsewhere"
-    outside.mkdir()
+    system_dir = tmp_path / "system_dir"
+    system_dir.mkdir()
     output_root = tmp_path / ".model_bridge" / "outputs"
     output_root.mkdir(parents=True)
-    (output_root / "reports").symlink_to(outside)
+    (output_root / "system").symlink_to(system_dir)
 
-    out = save_to_file("hello", "reports/result.txt")
+    out = save_to_file("hello", "system/blocked.txt")
 
     assert out.startswith("[SECURITY ERROR]")
-    assert not (outside / "result.txt").exists()
+    assert not (system_dir / "blocked.txt").exists()
 
 
 def test_save_to_file_rejects_symlinked_output_root(tmp_path: Path, monkeypatch):
