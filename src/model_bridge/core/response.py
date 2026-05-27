@@ -16,7 +16,6 @@ SAFE_OUTPUT_DIR = os.path.join(".model_bridge", "outputs")
 __all__ = [
     "DEBUG_META_DIR",
     "DEBUG_META_TTL_SECONDS",
-    "SAFE_OUTPUT_DIR",
     "_apply_verbosity",
     "_apply_max_output_tokens",
     "_format_stream_fallback",
@@ -179,7 +178,7 @@ def save_to_file(content: str, path: str) -> str:
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as handle:
             handle.write(clean_markdown_fences(content))
-        return f"[FILE SAVED] Successfully saved to: {path}\n(Output root: {SAFE_OUTPUT_DIR})"
+        return f"[FILE SAVED] Successfully saved to: {path}\n(Markdown fences removed automatically)"
     except Exception as exc:
         return f"[FILE ERROR] Failed to save: {exc}"
 
