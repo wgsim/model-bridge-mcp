@@ -1,3 +1,4 @@
+import os
 import subprocess
 import asyncio
 from unittest.mock import patch
@@ -101,6 +102,31 @@ def test_run_uses_adapter_path_for_command_lookup():
     assert ok is True
     assert output == "ok-output"
     assert run_mock.call_args.args[0] == ["ollama", "run", "llama3.2"]
+
+
+def test_run_uses_subprocess_exec_path_when_env_omits_path():
+    adapter = SubprocessAdapter(_build_config(), env={})
+    adapter.env.pop("PATH", None)
+    completed = subprocess.CompletedProcess(
+        args=["ollama", "run"],
+        returncode=0,
+        stdout="ok-output\n",
+        stderr="",
+    )
+    expected_path = os.pathsep.join(os.get_exec_path(adapter.env))
+
+    def fake_which(command, path=None):
+        assert command == "ollama"
+        assert path == expected_path
+        return "/usr/bin/ollama"
+
+    with patch("shutil.which", side_effect=fake_which), patch(
+        "subprocess.run", return_value=completed
+    ):
+        ok, output = adapter.run("ollama", ["llama3.2"], "hello")
+
+    assert ok is True
+    assert output == "ok-output"
 
 
 def test_run_handles_subprocess_exception():

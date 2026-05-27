@@ -90,6 +90,11 @@ def _is_safe_env_var_name(name: str) -> bool:
     return bool(re.match(r"^[A-Z][A-Z0-9_]*$", name))
 
 
+def _resolve_exec_search_path(env: Mapping[str, str] | None) -> str:
+    """Build the executable search path subprocess would use for the given environment."""
+    return os.pathsep.join(os.get_exec_path(env))
+
+
 def _discover_provider_env_vars(timeout: float = 3.0) -> dict[str, str]:
     """
     Discover provider authentication env vars from login shell.
@@ -399,7 +404,8 @@ class SubprocessAdapter(CLIAdapter):
             self._preflight_cache[service_name] = (*result, now)
             return result
 
-        if not shutil.which(cmd_base[0], path=self.env.get("PATH")):
+        lookup_path = _resolve_exec_search_path(self.env)
+        if not shutil.which(cmd_base[0], path=lookup_path):
             hint = INSTALL_HINTS.get(cmd_base[0], "")
             hint_suffix = f" Install: {hint}" if hint else ""
             result = (False, f"Command '{cmd_base[0]}' not found.{hint_suffix}")
@@ -523,7 +529,8 @@ class SubprocessAdapter(CLIAdapter):
         cmd_base = list(config.get("exec", []))
         if not cmd_base:
             return False, f"Configuration Error: No command defined for {service_name}", [], ""
-        if not shutil.which(cmd_base[0], path=self.env.get("PATH")):
+        lookup_path = _resolve_exec_search_path(self.env)
+        if not shutil.which(cmd_base[0], path=lookup_path):
             hint = INSTALL_HINTS.get(cmd_base[0], "")
             hint_suffix = f" Install: {hint}" if hint else ""
             return False, f"System Error: Command '{cmd_base[0]}' not found.{hint_suffix}", [], ""

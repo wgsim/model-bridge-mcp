@@ -144,6 +144,25 @@ class TestPreflightCheck:
         assert ok is True
         assert msg == "ok"
 
+    def test_preflight_uses_subprocess_exec_path_when_env_omits_path(self):
+        adapter = SubprocessAdapter(_build_config(), env={})
+        adapter.env.pop("PATH", None)
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
+        expected_path = os.pathsep.join(os.get_exec_path(adapter.env))
+
+        def fake_which(command, path=None):
+            assert command == "ollama"
+            assert path == expected_path
+            return "/usr/bin/ollama"
+
+        with patch("shutil.which", side_effect=fake_which), patch(
+            "subprocess.run", return_value=completed
+        ):
+            ok, msg = adapter.preflight_check("ollama")
+
+        assert ok is True
+        assert msg == "ok"
+
 
 def test_discover_provider_env_vars_collects_multiple_values():
     with patch.dict(
