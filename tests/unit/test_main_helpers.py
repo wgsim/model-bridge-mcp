@@ -67,6 +67,29 @@ def test_resolve_fallback_chain_deduplicates_and_skips_unknown(monkeypatch):
     assert chain == ["gpt-oss:20b", "qwen3-coder-next:Q4_K_M"]
 
 
+def test_save_to_file_writes_relative_path_under_output_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    out = main_module.save_to_file("hello", "reports/result.txt")
+
+    saved = tmp_path / ".model_bridge" / "outputs" / "reports" / "result.txt"
+    assert saved.read_text(encoding="utf-8") == "hello"
+    assert out.startswith("[FILE SAVED]")
+
+
+def test_save_to_file_rejects_absolute_user_path(tmp_path):
+    out = main_module.save_to_file("hello", str(tmp_path / "outside.txt"))
+    assert out.startswith("[SECURITY ERROR]")
+
+
+def test_save_to_file_rejects_parent_traversal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    out = main_module.save_to_file("hello", "../escape.txt")
+
+    assert out.startswith("[SECURITY ERROR]")
+
+
 def test_save_to_file_rejects_system_path():
     out = main_module.save_to_file("body", "/etc/blocked.txt")
     assert out.startswith("[SECURITY ERROR]")

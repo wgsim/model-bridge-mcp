@@ -11,10 +11,12 @@ from typing import Optional
 
 DEBUG_META_DIR = ".model_bridge/tmp"
 DEBUG_META_TTL_SECONDS = 48 * 60 * 60
+SAFE_OUTPUT_DIR = os.path.join(".model_bridge", "outputs")
 
 __all__ = [
     "DEBUG_META_DIR",
     "DEBUG_META_TTL_SECONDS",
+    "SAFE_OUTPUT_DIR",
     "_apply_verbosity",
     "_apply_max_output_tokens",
     "_format_stream_fallback",
@@ -141,25 +143,43 @@ def clean_markdown_fences(content: str) -> str:
     return content
 
 
+def _resolve_safe_output_path(path: str, output_root: str = SAFE_OUTPUT_DIR) -> tuple[str | None, str | None]:
+    expanded = os.path.expanduser(path)
+    if os.path.isabs(expanded):
+        return None, f"[SECURITY ERROR] save_path must be relative to '{output_root}'."
+
+    normalized = os.path.normpath(expanded)
+    if normalized in {".", ""} or normalized.startswith(".."):
+        return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
+
+    root_base = os.path.abspath(output_root)
+    current = root_base
+    while True:
+        if os.path.lexists(current) and os.path.islink(current):
+            return None, f"[SECURITY ERROR] Output root '{output_root}' must not use symlinked path components."
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+
+    os.makedirs(root_base, exist_ok=True)
+    root = os.path.realpath(root_base)
+    full_path = os.path.realpath(os.path.join(root, normalized))
+    if full_path != root and not full_path.startswith(root + os.sep):
+        return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
+    return full_path, None
+
+
 def save_to_file(content: str, path: str) -> str:
     try:
-        protected_roots = ("/etc", "/var", "/usr", "/bin", "/sbin", "/root")
-        protected_prefixes = set(protected_roots)
-        # macOS commonly resolves /etc -> /private/etc; include this alias
-        protected_prefixes.add(os.path.realpath("/etc"))
-
-        full_path = os.path.abspath(os.path.expanduser(path))
-        resolved_path = os.path.realpath(full_path)
-        def _under_prefix(candidate: str, prefix: str) -> bool:
-            return candidate == prefix or candidate.startswith(prefix + "/")
-
-        if any(_under_prefix(resolved_path, prefix) for prefix in protected_prefixes):
-            return f"[SECURITY ERROR] Writing to system path '{path}' is forbidden."
-
+        full_path, error = _resolve_safe_output_path(path)
+        if error:
+            return error
+        assert full_path is not None
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as handle:
             handle.write(clean_markdown_fences(content))
-        return f"[FILE SAVED] Successfully saved to: {path}\n(Markdown fences removed automatically)"
+        return f"[FILE SAVED] Successfully saved to: {path}\n(Output root: {SAFE_OUTPUT_DIR})"
     except Exception as exc:
         return f"[FILE ERROR] Failed to save: {exc}"
 
