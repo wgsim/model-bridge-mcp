@@ -106,11 +106,14 @@ def test_save_to_file_rejects_symlinked_output_root(tmp_path: Path, monkeypatch)
 
 def test_save_to_file_rejects_symlinked_output_root_parent(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / ".model_bridge").symlink_to(tmp_path / "elsewhere")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (tmp_path / ".model_bridge").symlink_to(outside)
 
     out = save_to_file("hello", "reports/result.txt")
 
     assert out.startswith("[SECURITY ERROR]")
+    assert not (outside / "outputs" / "reports" / "result.txt").exists()
 ```
 
 - [ ] **Step 2: Run the targeted test file and verify the new tests fail for the expected reason**
@@ -140,13 +143,14 @@ def _resolve_safe_output_path(path: str, output_root: str = SAFE_OUTPUT_DIR) -> 
         return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
 
     root_base = os.path.abspath(output_root)
-    parent = root_base
-    while parent and parent != os.path.dirname(parent):
-        if os.path.lexists(parent) and os.path.islink(parent):
+    current = root_base
+    while True:
+        if os.path.lexists(current) and os.path.islink(current):
             return None, f"[SECURITY ERROR] Output root '{output_root}' must not use symlinked path components."
-        parent = os.path.dirname(parent)
-    if os.path.lexists(root_base) and os.path.islink(root_base):
-        return None, f"[SECURITY ERROR] Output root '{output_root}' must not be a symlink."
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
     os.makedirs(root_base, exist_ok=True)
     root = os.path.realpath(root_base)
 
