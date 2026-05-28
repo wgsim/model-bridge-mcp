@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from model_bridge import main as main_module
 from model_bridge.core import response as response_module
 from model_bridge.core.response import _mask_sensitive_text
 from model_bridge.main import _save_if_requested, save_to_file
@@ -69,6 +72,61 @@ def test_save_if_requested_skips_debug_meta_when_disabled(tmp_path: Path, monkey
     assert saved.read_text(encoding="utf-8") == "body"
     assert list(debug_dir.glob("*.meta.log")) == []
     assert "[DEBUG META]" not in out
+
+
+@pytest.mark.parametrize("runtime_cfg", [{}, {"save_debug_meta_on_save": False}])
+def test_save_response_if_requested_forwards_debug_meta_false(monkeypatch, runtime_cfg):
+    captured = {}
+
+    monkeypatch.setattr(main_module, "_get_config", lambda: {"runtime": runtime_cfg})
+
+    def fake_save_if_requested(response, save_path, *, tool_name, save_debug_meta, **kwargs):
+        captured["response"] = response
+        captured["save_path"] = save_path
+        captured["tool_name"] = tool_name
+        captured["save_debug_meta"] = save_debug_meta
+        captured["kwargs"] = kwargs
+        return "saved-response"
+
+    monkeypatch.setattr(main_module, "_save_if_requested", fake_save_if_requested)
+
+    out = main_module._save_response_if_requested("body", "result.txt", "ask_chatgpt_cli")
+
+    assert out == "saved-response"
+    assert captured == {
+        "response": "body",
+        "save_path": "result.txt",
+        "tool_name": "ask_chatgpt_cli",
+        "save_debug_meta": False,
+        "kwargs": {},
+    }
+
+
+def test_save_response_if_requested_forwards_debug_meta_true(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(main_module, "_get_config", lambda: {"runtime": {"save_debug_meta_on_save": True}})
+
+    def fake_save_if_requested(response, save_path, *, tool_name, save_debug_meta, **kwargs):
+        captured["response"] = response
+        captured["save_path"] = save_path
+        captured["tool_name"] = tool_name
+        captured["save_debug_meta"] = save_debug_meta
+        captured["kwargs"] = kwargs
+        return "saved-response"
+
+    monkeypatch.setattr(main_module, "_save_if_requested", fake_save_if_requested)
+
+    out = main_module._save_response_if_requested("body", "result.txt", "ask_chatgpt_cli")
+
+    assert out == "saved-response"
+    assert captured == {
+        "response": "body",
+        "save_path": "result.txt",
+        "tool_name": "ask_chatgpt_cli",
+        "save_debug_meta": True,
+        "kwargs": {},
+    }
 
 
 def test_save_if_requested_masks_sensitive_text_in_meta(tmp_path: Path):
