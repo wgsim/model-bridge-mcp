@@ -90,6 +90,16 @@ def test_save_to_file_rejects_parent_traversal(tmp_path, monkeypatch):
     assert out.startswith("[SECURITY ERROR]")
 
 
+def test_save_to_file_allows_dotdot_prefixed_directory_name(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    out = main_module.save_to_file("hello", "..hidden/result.txt")
+
+    saved = tmp_path / ".model_bridge" / "outputs" / "..hidden" / "result.txt"
+    assert saved.read_text(encoding="utf-8") == "hello"
+    assert out.startswith("[FILE SAVED]")
+
+
 def test_save_to_file_rejects_system_path():
     out = main_module.save_to_file("body", "/etc/blocked.txt")
     assert out.startswith("[SECURITY ERROR]")

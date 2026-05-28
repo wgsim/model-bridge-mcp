@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from model_bridge.core import response as response_module
 from model_bridge.main import _save_if_requested, save_to_file
 
 
@@ -91,3 +92,27 @@ def test_save_to_file_rejects_symlinked_output_root_parent(tmp_path: Path, monke
 
     assert out.startswith("[SECURITY ERROR]")
     assert not (outside / "outputs" / "reports" / "result.txt").exists()
+
+
+def test_save_to_file_rejects_symlinked_leaf_created_during_write(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_file = outside_dir / "escaped.txt"
+    target_dir = tmp_path / ".model_bridge" / "outputs" / "reports"
+    original_open_directory = response_module._open_directory_no_symlink
+
+    def racing_open_directory(path_part: str, dir_fd: int, *, create: bool) -> int:
+        opened_fd = original_open_directory(path_part, dir_fd, create=create)
+        if path_part == "reports":
+            escaped_link = target_dir / "result.txt"
+            if not escaped_link.exists() and not escaped_link.is_symlink():
+                escaped_link.symlink_to(outside_file)
+        return opened_fd
+
+    monkeypatch.setattr(response_module, "_open_directory_no_symlink", racing_open_directory)
+
+    out = save_to_file("hello", "reports/result.txt")
+
+    assert not out.startswith("[FILE SAVED]")
+    assert not outside_file.exists()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -30,12 +31,10 @@ __all__ = [
     "_mark_cached_json_payload",
 ]
 
-
 def _apply_verbosity(text: str, verbosity: str) -> str:
     if verbosity == "brief":
         return text[:600].rstrip()
     return text
-
 
 def _apply_max_output_tokens(text: str, max_output_tokens: int) -> str:
     if max_output_tokens <= 0:
@@ -45,11 +44,9 @@ def _apply_max_output_tokens(text: str, max_output_tokens: int) -> str:
         return text
     return " ".join(tokens[:max_output_tokens])
 
-
 def _format_stream_fallback(text: str) -> str:
     chunks = [text[i : i + 200] for i in range(0, len(text), 200)] or [""]
     return "[STREAM FALLBACK]\n" + "\n".join(chunks) + "\n[STREAM END]"
-
 
 def _finalize_response(response: str, provider: str, options: dict, cached: bool = False) -> str:
     body = _apply_verbosity(response, options["verbosity"])
@@ -70,7 +67,6 @@ def _finalize_response(response: str, provider: str, options: dict, cached: bool
         return json.dumps(payload, ensure_ascii=False)
     return body
 
-
 def _split_body_and_meta(response: str) -> tuple[str, str]:
     routing_marker = "\n\n--- [Routing Log] ---\n"
     if response.startswith("[Task Execution Failed]"):
@@ -83,7 +79,6 @@ def _split_body_and_meta(response: str) -> tuple[str, str]:
     if response.startswith("[Source: Ollama]\n"):
         return response.split("\n", 1)[1].strip(), response
     return response.strip(), response
-
 
 def _mask_sensitive_text(text: str) -> str:
     masked = re.sub(
@@ -98,7 +93,6 @@ def _mask_sensitive_text(text: str) -> str:
     )
     return masked
 
-
 def _cleanup_old_meta_logs(debug_dir: str, ttl_seconds: int = DEBUG_META_TTL_SECONDS) -> None:
     if not os.path.isdir(debug_dir):
         return
@@ -111,7 +105,6 @@ def _cleanup_old_meta_logs(debug_dir: str, ttl_seconds: int = DEBUG_META_TTL_SEC
                 os.remove(entry.path)
         except OSError:
             continue
-
 
 def _save_debug_meta(
     response: str,
@@ -133,7 +126,6 @@ def _save_debug_meta(
         handle.write(sanitized_response)
     return meta_path
 
-
 def clean_markdown_fences(content: str) -> str:
     pattern = r"^```[a-zA-Z]*\n([\s\S]*?)\n```$"
     match = re.match(pattern, content.strip())
@@ -141,14 +133,26 @@ def clean_markdown_fences(content: str) -> str:
         return match.group(1)
     return content
 
+def _split_path_parts(path: str) -> list[str]:
+    return [part for part in re.split(r"[\\/]+", path) if part not in {"", "."}]
 
-def _resolve_safe_output_path(path: str, output_root: str = SAFE_OUTPUT_DIR) -> tuple[str | None, str | None]:
+
+def _directory_open_flags() -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
+def _resolve_safe_output_path(path: str, output_root: str = SAFE_OUTPUT_DIR) -> tuple[list[str] | None, str | None]:
     expanded = os.path.expanduser(path)
     if os.path.isabs(expanded):
         return None, f"[SECURITY ERROR] save_path must be relative to '{output_root}'."
 
-    normalized = os.path.normpath(expanded)
-    if normalized in {".", ""} or normalized.startswith(".."):
+    relative_parts = _split_path_parts(expanded)
+    if not relative_parts or any(part == ".." for part in relative_parts):
         return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
 
     root_base = os.path.abspath(output_root)
@@ -161,27 +165,55 @@ def _resolve_safe_output_path(path: str, output_root: str = SAFE_OUTPUT_DIR) -> 
             break
         current = parent
 
-    os.makedirs(root_base, exist_ok=True)
-    root = os.path.realpath(root_base)
-    full_path = os.path.realpath(os.path.join(root, normalized))
-    if full_path != root and not full_path.startswith(root + os.sep):
-        return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
-    return full_path, None
+    return relative_parts, None
+
+
+def _open_directory_no_symlink(path_part: str, dir_fd: int, *, create: bool) -> int:
+    if create:
+        try:
+            os.mkdir(path_part, dir_fd=dir_fd)
+        except FileExistsError:
+            pass
+    return os.open(path_part, _directory_open_flags(), dir_fd=dir_fd)
+
+
+def _write_safe_output_file(content: str, relative_parts: list[str], output_root: str = SAFE_OUTPUT_DIR) -> None:
+    current_fd = os.open(".", _directory_open_flags())
+    try:
+        for part in _split_path_parts(output_root):
+            next_fd = _open_directory_no_symlink(part, current_fd, create=True)
+            os.close(current_fd)
+            current_fd = next_fd
+
+        for part in relative_parts[:-1]:
+            next_fd = _open_directory_no_symlink(part, current_fd, create=True)
+            os.close(current_fd)
+            current_fd = next_fd
+
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        file_fd = os.open(relative_parts[-1], flags, 0o644, dir_fd=current_fd)
+        with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+            handle.write(clean_markdown_fences(content))
+    finally:
+        os.close(current_fd)
 
 
 def save_to_file(content: str, path: str) -> str:
     try:
-        full_path, error = _resolve_safe_output_path(path)
+        relative_parts, error = _resolve_safe_output_path(path)
         if error:
             return error
-        assert full_path is not None
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "w", encoding="utf-8") as handle:
-            handle.write(clean_markdown_fences(content))
+        assert relative_parts is not None
+        _write_safe_output_file(content, relative_parts)
         return f"[FILE SAVED] Successfully saved to: {path}\n(Markdown fences removed automatically)"
+    except OSError as exc:
+        if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+            return f"[SECURITY ERROR] save_path must stay within '{SAFE_OUTPUT_DIR}'."
+        return f"[FILE ERROR] Failed to save: {exc}"
     except Exception as exc:
         return f"[FILE ERROR] Failed to save: {exc}"
-
 
 def _save_if_requested(
     response: str,
@@ -198,7 +230,6 @@ def _save_if_requested(
         save_result = "[FILE SKIPPED] No model body extracted from response."
     meta_path = _save_debug_meta(full_response, tool_name=tool_name, debug_dir=debug_dir)
     return f"{save_result}\n[DEBUG META] Saved to: {meta_path}\n\n{response}"
-
 
 def _mark_cached_json_payload(payload_or_text: object) -> str | None:
     if isinstance(payload_or_text, dict):
