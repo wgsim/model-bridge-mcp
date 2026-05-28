@@ -1,6 +1,6 @@
 commands:
   codex:
-    exec: ["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"]
+    exec: ["codex", "exec", "--skip-git-repo-check"]
     health: ["codex", "--version"]
   gemini:
     exec: ["gemini", "-p"]
@@ -9,7 +9,7 @@ commands:
     exec: ["ollama", "run"]
     health: ["ollama", "--version"]
   claude_code:
-    exec: ["claude", "-p", "--dangerously-skip-permissions"]
+    exec: ["claude", "-p"]
     health: ["claude", "--version"]
   agy:
     exec: ["agy", "-p"]

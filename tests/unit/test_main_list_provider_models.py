@@ -10,7 +10,7 @@ def _fake_config():
             "gemini": {"exec": ["gemini", "-p"]},
             "ollama": {"exec": ["ollama", "run"]},
             "claude_code": {"exec": ["claude", "-p"]},
-            "agy": {"exec": ["agy", "-p", "--dangerously-skip-permissions"]},
+            "agy": {"exec": ["agy", "-p"]},
         },
         "models": {
             "ollama_default_model": "gpt-oss:20b",

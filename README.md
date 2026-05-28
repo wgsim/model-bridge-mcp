@@ -103,6 +103,20 @@ runtime:
 
 **Note**: List fields (like `extra_path`) are **replaced**, not concatenated. If default has `extra_path: ["/a"]` and local has `extra_path: ["~/b"]`, the result is `["~/b"]` only.
 
+### Local opt-in for dangerous provider flags
+
+Shipped defaults keep approval-bypass flags disabled. If you intentionally want those flags for local experimentation, opt in only from `~/.model_bridge/local.yaml`:
+
+```yaml
+commands:
+  codex:
+    exec: ["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"]
+  claude_code:
+    exec: ["claude", "-p", "--dangerously-skip-permissions"]
+  agy:
+    exec: ["agy", "-p", "--dangerously-skip-permissions"]
+```
+
 Config loader verification:
 ```bash
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridge.config.config_loader --pretty'

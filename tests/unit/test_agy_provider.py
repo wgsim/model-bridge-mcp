@@ -7,6 +7,7 @@ from model_bridge.core.provider_registry import build_default_provider_registry
 from model_bridge.main import ask_agy_cli, _ask_with_failover, _dispatch_ask_provider
 
 def _build_agy_config():
+    # Keep the dangerous skip-permissions flag explicit here for warning-path coverage.
     return {
         "commands": {
             "agy": {
