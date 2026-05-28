@@ -75,6 +75,7 @@ def test_save_to_file_writes_relative_path_under_output_root(tmp_path, monkeypat
     saved = tmp_path / ".model_bridge" / "outputs" / "reports" / "result.txt"
     assert saved.read_text(encoding="utf-8") == "hello"
     assert out.startswith("[FILE SAVED]")
+    assert ".model_bridge/outputs/reports/result.txt" in out
 
 
 def test_save_to_file_rejects_absolute_user_path(tmp_path):

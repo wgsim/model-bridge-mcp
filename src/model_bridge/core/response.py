@@ -208,7 +208,8 @@ def save_to_file(content: str, path: str) -> str:
             return error
         assert relative_parts is not None
         _write_safe_output_file(content, relative_parts)
-        return f"[FILE SAVED] Successfully saved to: {path}\n(Markdown fences removed automatically)"
+        saved_path = os.path.join(SAFE_OUTPUT_DIR, *relative_parts)
+        return f"[FILE SAVED] Successfully saved to: {saved_path}\n(Markdown fences removed automatically)"
     except OSError as exc:
         if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
             return f"[SECURITY ERROR] save_path must stay within '{SAFE_OUTPUT_DIR}'."
