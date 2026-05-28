@@ -914,7 +914,7 @@ async def ask_chatgpt_cli(
 
     Args:
         prompt: The text prompt to send.
-        save_path: Optional relative output path under .model_bridge/outputs used to save the response body.
+        save_path: Optional relative output path under .model_bridge/outputs used to save the response body. Absolute paths are rejected.
         force_model: If True, skip failover and only use the primary provider.
         model: Model name override (e.g. 'gpt-4o'). None uses config default.
         reasoning_effort: Provider-specific reasoning effort override for supported providers.
@@ -966,7 +966,7 @@ async def ask_gemini_cli(
 
     Args:
         prompt: The text prompt to send.
-        save_path: Optional relative output path under .model_bridge/outputs used to save the response body.
+        save_path: Optional relative output path under .model_bridge/outputs used to save the response body. Absolute paths are rejected.
         force_model: If True, skip failover and only use the primary provider.
         model: Model name override (e.g. 'gemini-2.5-pro'). None uses config default.
         reasoning_effort: Gemini sdk-only reasoning effort override for Gemini 3.x models.
@@ -1016,7 +1016,7 @@ async def ask_ollama(
 
     Args:
         prompt: The text prompt to send.
-        save_path: Optional relative output path under .model_bridge/outputs used to save the response body.
+        save_path: Optional relative output path under .model_bridge/outputs used to save the response body. Absolute paths are rejected.
         model: Ollama model name or alias. 'default' uses config default, 'auto' selects by prompt.
         timeout_seconds: Per-call timeout. Default from config ollama_timeout_seconds (~300s).
         max_output_tokens: Limit response tokens (provider-dependent).
@@ -1118,7 +1118,7 @@ async def ask_claude_code(
 
     Args:
         prompt: The text prompt to send.
-        save_path: Optional relative output path under .model_bridge/outputs used to save the response body.
+        save_path: Optional relative output path under .model_bridge/outputs used to save the response body. Absolute paths are rejected.
         force_model: If True, skip failover and only use Claude Code.
         model: Model name override. None uses config default.
         reasoning_effort: Claude-only reasoning effort override.
@@ -1179,7 +1179,7 @@ async def ask_agy_cli(
 
     Args:
         prompt: The text prompt to send.
-        save_path: Optional relative output path under .model_bridge/outputs used to save the response body.
+        save_path: Optional relative output path under .model_bridge/outputs used to save the response body. Absolute paths are rejected.
         force_model: If True, skip failover and only use agy CLI.
         model: Model override (None, 'default', or 'auto' only for agy).
         timeout_seconds: Timeout in seconds. Default 300s.
@@ -1246,8 +1246,8 @@ async def ask(
         prompt: The text prompt to send.
         provider: 'auto' (default, routes to codex), 'codex', 'gemini', 'ollama', 'claude_code'.
         model: Model name or 'default'/'auto'. Provider-specific (e.g. 'gpt-4o', 'gemini-2.5-pro').
-        reasoning_effort: Codex-only reasoning effort override.
-        save_path: Optional relative output path under .model_bridge/outputs used to save the response body.
+        reasoning_effort: Provider-specific reasoning effort override for supported providers.
+        save_path: Optional relative output path under .model_bridge/outputs used to save the response body. Absolute paths are rejected.
         force_model: If True, skip failover chain.
         timeout_seconds: Per-call timeout in seconds. Default from config.
         max_output_tokens: Limit response tokens.
@@ -1353,10 +1353,10 @@ async def ask_batch(
         prompts: List of text prompts to send.
         provider: 'auto' (default), 'codex', 'gemini', 'ollama', 'claude_code'.
         model: Model name or 'default'/'auto'.
-        reasoning_effort: Codex-only reasoning effort override.
+        reasoning_effort: Provider-specific reasoning effort override for supported providers.
         mode: 'sequential' (default) or 'parallel'.
         max_concurrency: Max parallel requests when mode='parallel' (default 3).
-        save_path: Optional relative output path under .model_bridge/outputs forwarded to each ask() call to save that prompt's response body.
+        save_path: Optional relative output path under .model_bridge/outputs forwarded to each ask() call to save that prompt's response body. Absolute paths are rejected.
         force_model: If True, skip failover chain.
         timeout_seconds: Per-call timeout in seconds.
         max_output_tokens: Limit response tokens.
