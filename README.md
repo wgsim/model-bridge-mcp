@@ -213,7 +213,7 @@ You can use the new unified tool:
   - `verbosity` (`brief`/`normal`/`detailed`)
   - `stream` (fallback chunk mode)
   - `session_id` (for optional session continuity)
-  - `save_path`: optional relative path under `.model_bridge/outputs`; absolute paths are rejected
+  - `save_path`: pass a relative path like `reports/result.txt`; it is saved under `.model_bridge/outputs/...`; do not include the `.model_bridge/outputs` prefix; absolute paths and traversal escapes are rejected
 
 Runtime behavior:
 - Optional prompt cache (TTL + max entries).
@@ -226,7 +226,7 @@ Use `ask_batch(...)` to process multiple prompts in one MCP call.
 - `mode: sequential|parallel` (default: `sequential`)
 - `max_concurrency` (used when `mode=parallel`)
 - Reuses existing ask options: `provider`, `model`, `force_model`, `timeout_seconds`, `response_format`, `verbosity`, `stream`, `session_id`
-- `save_path`: optional relative path under `.model_bridge/outputs`; absolute paths are rejected and the path is forwarded to each per-prompt `ask()` call
+- `save_path`: pass a relative path like `reports/result.txt`; it is saved under `.model_bridge/outputs/...`; do not include the `.model_bridge/outputs` prefix; absolute paths and traversal escapes are rejected, and the path is forwarded to each per-prompt `ask()` call
 
 `ask_batch` executes within MCP server orchestration, so external client parallelism is not required.
 
