@@ -96,7 +96,7 @@ def test_save_to_file_rejects_redundant_output_root_prefix(tmp_path, monkeypatch
     out = main_module.save_to_file("hello", ".model_bridge/outputs/reports/result.txt")
 
     saved = tmp_path / ".model_bridge" / "outputs" / ".model_bridge" / "outputs" / "reports" / "result.txt"
-    assert out.startswith("[SECURITY ERROR]")
+    assert out == "[SECURITY ERROR] save_path must not include the '.model_bridge/outputs' prefix."
     assert not saved.exists()
 
 
