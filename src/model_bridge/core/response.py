@@ -81,16 +81,17 @@ def _split_body_and_meta(response: str) -> tuple[str, str]:
     return response.strip(), response
 
 def _mask_sensitive_text(text: str) -> str:
-    masked = re.sub(
-        r"(?i)(authorization\s*:\s*bearer\s+)([^\s]+)",
-        r"\1***MASKED***",
-        text,
-    )
-    masked = re.sub(
-        r"(?i)(api[_-]?key\s*[:=]\s*)([^\s\"']+)",
-        r"\1***MASKED***",
-        masked,
-    )
+    patterns = [
+        (r"(?i)(authorization\s*:\s*bearer\s+)([^\s]+)", r"\1***MASKED***"),
+        (r"(?i)(api[_-]?key\s*[:=]\s*)([^\s\"']+)", r"\1***MASKED***"),
+        (r"(?i)(x-api-key\s*:\s*)([^\s\"']+)", r"\1***MASKED***"),
+        (r"(?i)(refresh_token\s*[:=]\s*)([^\s\"']+)", r"\1***MASKED***"),
+        (r"(?i)(access_token\s*[:=]\s*)([^\s\"']+)", r"\1***MASKED***"),
+        (r"(?i)(cookie\s*:\s*)([^\n]+)", r"\1***MASKED***"),
+    ]
+    masked = text
+    for pattern, repl in patterns:
+        masked = re.sub(pattern, repl, masked)
     return masked
 
 def _cleanup_old_meta_logs(debug_dir: str, ttl_seconds: int = DEBUG_META_TTL_SECONDS) -> None:
@@ -220,14 +221,18 @@ def _save_if_requested(
     save_path: Optional[str],
     tool_name: str,
     debug_dir: str = DEBUG_META_DIR,
+    save_debug_meta: bool = False,
 ) -> str:
     if not save_path:
         return response
     body, full_response = _split_body_and_meta(response)
-    if body:
-        save_result = save_to_file(body, save_path)
-    else:
-        save_result = "[FILE SKIPPED] No model body extracted from response."
+    save_result = (
+        save_to_file(body, save_path)
+        if body
+        else "[FILE SKIPPED] No model body extracted from response."
+    )
+    if not save_debug_meta:
+        return f"{save_result}\n\n{response}"
     meta_path = _save_debug_meta(full_response, tool_name=tool_name, debug_dir=debug_dir)
     return f"{save_result}\n[DEBUG META] Saved to: {meta_path}\n\n{response}"
 

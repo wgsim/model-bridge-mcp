@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from model_bridge.core import response as response_module
+from model_bridge.core.response import _mask_sensitive_text
 from model_bridge.main import _save_if_requested, save_to_file
 
 
@@ -10,7 +11,13 @@ def test_save_if_requested_saves_body_only_and_meta(tmp_path: Path, monkeypatch)
     target = "result.txt"
     debug_dir = tmp_path / ".tmp-debug"
 
-    out = _save_if_requested(response, target, tool_name="ask_chatgpt_cli", debug_dir=str(debug_dir))
+    out = _save_if_requested(
+        response,
+        target,
+        tool_name="ask_chatgpt_cli",
+        debug_dir=str(debug_dir),
+        save_debug_meta=True,
+    )
 
     saved = tmp_path / ".model_bridge" / "outputs" / target
     assert saved.read_text(encoding="utf-8") == "generated body"
@@ -30,12 +37,38 @@ def test_save_if_requested_skips_body_file_on_failure(tmp_path: Path):
     target = tmp_path / "result.txt"
     debug_dir = tmp_path / ".tmp-debug"
 
-    out = _save_if_requested(response, str(target), tool_name="ask_chatgpt_cli", debug_dir=str(debug_dir))
+    out = _save_if_requested(
+        response,
+        str(target),
+        tool_name="ask_chatgpt_cli",
+        debug_dir=str(debug_dir),
+        save_debug_meta=True,
+    )
 
     assert not target.exists()
     meta_files = list(debug_dir.glob("*.meta.log"))
     assert len(meta_files) == 1
     assert "[FILE SKIPPED] No model body extracted from response." in out
+
+
+def test_save_if_requested_skips_debug_meta_when_disabled(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    response = "body\n\n--- [Routing Log] ---\nAuthorization: Bearer SECRET_TOKEN"
+    target = "result.txt"
+    debug_dir = tmp_path / ".tmp-debug"
+
+    out = _save_if_requested(
+        response,
+        target,
+        tool_name="ask_chatgpt_cli",
+        debug_dir=str(debug_dir),
+        save_debug_meta=False,
+    )
+
+    saved = tmp_path / ".model_bridge" / "outputs" / "result.txt"
+    assert saved.read_text(encoding="utf-8") == "body"
+    assert list(debug_dir.glob("*.meta.log")) == []
+    assert "[DEBUG META]" not in out
 
 
 def test_save_if_requested_masks_sensitive_text_in_meta(tmp_path: Path):
@@ -47,7 +80,13 @@ def test_save_if_requested_masks_sensitive_text_in_meta(tmp_path: Path):
     target = tmp_path / "result.txt"
     debug_dir = tmp_path / ".tmp-debug"
 
-    _save_if_requested(response, str(target), tool_name="ask_chatgpt_cli", debug_dir=str(debug_dir))
+    _save_if_requested(
+        response,
+        str(target),
+        tool_name="ask_chatgpt_cli",
+        debug_dir=str(debug_dir),
+        save_debug_meta=True,
+    )
 
     meta_files = list(debug_dir.glob("*.meta.log"))
     assert len(meta_files) == 1
@@ -55,6 +94,21 @@ def test_save_if_requested_masks_sensitive_text_in_meta(tmp_path: Path):
     assert "SECRET_TOKEN" not in meta_text
     assert "MY_REAL_KEY" not in meta_text
     assert "***MASKED***" in meta_text
+
+
+def test_mask_sensitive_text_masks_common_token_fields():
+    masked = _mask_sensitive_text(
+        "Authorization: Bearer SECRET\n"
+        "x-api-key: APISECRET\n"
+        "refresh_token=REFRESHSECRET\n"
+        "cookie: session=COOKIESECRET"
+    )
+
+    assert "SECRET" not in masked
+    assert "APISECRET" not in masked
+    assert "REFRESHSECRET" not in masked
+    assert "COOKIESECRET" not in masked
+    assert masked.count("***MASKED***") >= 4
 
 
 def test_save_to_file_blocks_symlink_path_resolving_to_system_dir(tmp_path: Path, monkeypatch):

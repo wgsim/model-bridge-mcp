@@ -76,6 +76,7 @@ def test_load_config_from_default_succeeds():
     assert "ollama_resource_guard_enabled" in config["runtime"]
     assert "ollama_model_memory_gb" in config["runtime"]
     assert config["runtime"]["transport_mode"] == "subprocess"
+    assert config["runtime"]["save_debug_meta_on_save"] is False
 
 
 def test_load_config_missing_file_raises_config_not_found():

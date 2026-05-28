@@ -159,6 +159,16 @@ def _get_config() -> dict:
     return _RUNTIME.config
 
 
+def _save_response_if_requested(response: str, save_path: str | None, tool_name: str) -> str:
+    runtime_cfg = _get_config().get("runtime", {})
+    return _save_if_requested(
+        response,
+        save_path,
+        tool_name=tool_name,
+        save_debug_meta=runtime_cfg.get("save_debug_meta_on_save", False),
+    )
+
+
 def _get_adapter() -> BaseAdapter:
     _ensure_runtime()
     assert _RUNTIME is not None
@@ -882,7 +892,7 @@ async def _ask_with_failover(
             break
         if not _is_model_selection_failure(response):
             break
-    response = _save_if_requested(response, save_path, tool_name=tool_name)
+    response = _save_response_if_requested(response, save_path, tool_name=tool_name)
     return _finalize_response(response, primary_provider, options)
 
 
@@ -1068,7 +1078,7 @@ async def ask_ollama(
         )
         if success:
             response = f"[Source: Ollama]\n{output}"
-            response = _save_if_requested(response, save_path, tool_name="ask_ollama")
+            response = _save_response_if_requested(response, save_path, tool_name="ask_ollama")
             return _finalize_response(response, "ollama", options)
         last_local_error = output
 
@@ -1086,7 +1096,7 @@ async def ask_ollama(
         timeout_seconds=options["timeout_seconds"],
         output_mode=normalized_output_mode,
     )
-    response = _save_if_requested(response, save_path, tool_name="ask_ollama")
+    response = _save_response_if_requested(response, save_path, tool_name="ask_ollama")
     return _finalize_response(response, "ollama", options)
 
 

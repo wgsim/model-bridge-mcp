@@ -105,6 +105,7 @@ runtime:
   subprocess_timeout_seconds: 120
   ollama_timeout_seconds: 300
   agy_timeout_seconds: 300
+  save_debug_meta_on_save: false
 
   # Additional PATH directories for CLI discovery (highest priority)
   # Useful when CLIs are installed in non-standard locations

@@ -159,6 +159,7 @@ class RuntimeConfig(BaseModel):
     ollama_timeout_seconds: float = Field(default=300.0, gt=0)
     agy_timeout_seconds: float = Field(default=300.0, gt=0)
     ask_defaults: AskDefaultsConfig = Field(default_factory=AskDefaultsConfig)
+    save_debug_meta_on_save: bool = False
 
     prompt_cache_enabled: bool = True
     prompt_cache_ttl_seconds: int = Field(default=300, ge=1)
