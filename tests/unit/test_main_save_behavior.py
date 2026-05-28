@@ -154,6 +154,32 @@ def test_save_if_requested_masks_sensitive_text_in_meta(tmp_path: Path):
     assert "***MASKED***" in meta_text
 
 
+def test_save_debug_meta_rejects_symlinked_debug_root(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / ".model_bridge").symlink_to(outside)
+
+    with pytest.raises(OSError):
+        response_module._save_debug_meta("routing log", tool_name="ask_chatgpt_cli")
+
+    assert list(outside.rglob("*.meta.log")) == []
+
+
+def test_save_debug_meta_rejects_symlinked_debug_dir(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    model_bridge_dir = tmp_path / ".model_bridge"
+    model_bridge_dir.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (model_bridge_dir / "tmp").symlink_to(outside)
+
+    with pytest.raises(OSError):
+        response_module._save_debug_meta("routing log", tool_name="ask_chatgpt_cli")
+
+    assert list(outside.glob("*.meta.log")) == []
+
+
 def test_mask_sensitive_text_masks_common_token_fields():
     masked = _mask_sensitive_text(
         "Authorization: Bearer SECRET\n"

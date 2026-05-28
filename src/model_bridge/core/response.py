@@ -113,19 +113,23 @@ def _save_debug_meta(
     debug_dir: str = DEBUG_META_DIR,
     ttl_seconds: int = DEBUG_META_TTL_SECONDS,
 ) -> str:
-    os.makedirs(debug_dir, exist_ok=True)
-    _cleanup_old_meta_logs(debug_dir, ttl_seconds=ttl_seconds)
     now_utc = datetime.now(timezone.utc)
     ts = now_utc.strftime("%Y%m%dT%H%M%SZ")
     filename = f"{ts}_{tool_name}_{time.time_ns()}.meta.log"
-    meta_path = os.path.join(debug_dir, filename)
+    relative_parts, error = _resolve_safe_output_path(filename, output_root=debug_dir)
+    if error:
+        raise OSError(errno.ELOOP, error)
+    assert relative_parts is not None
+    _cleanup_old_meta_logs(debug_dir, ttl_seconds=ttl_seconds)
     sanitized_response = _mask_sensitive_text(response)
-    with open(meta_path, "w", encoding="utf-8") as handle:
-        handle.write(f"tool: {tool_name}\n")
-        handle.write(f"created_at_utc: {now_utc.isoformat()}\n")
-        handle.write("\n")
-        handle.write(sanitized_response)
-    return meta_path
+    meta_content = (
+        f"tool: {tool_name}\n"
+        f"created_at_utc: {now_utc.isoformat()}\n"
+        "\n"
+        f"{sanitized_response}"
+    )
+    _write_safe_output_file(meta_content, relative_parts, output_root=debug_dir)
+    return os.path.join(debug_dir, filename)
 
 def clean_markdown_fences(content: str) -> str:
     pattern = r"^```[a-zA-Z]*\n([\s\S]*?)\n```$"
@@ -156,7 +160,7 @@ def _resolve_safe_output_path(path: str, output_root: str = SAFE_OUTPUT_DIR) -> 
     if not relative_parts or any(part == ".." for part in relative_parts):
         return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
 
-    root_base = os.path.abspath(output_root)
+    root_base = os.path.abspath(os.path.expanduser(output_root))
     current = root_base
     while True:
         if os.path.lexists(current) and os.path.islink(current):
@@ -179,9 +183,17 @@ def _open_directory_no_symlink(path_part: str, dir_fd: int, *, create: bool) -> 
 
 
 def _write_safe_output_file(content: str, relative_parts: list[str], output_root: str = SAFE_OUTPUT_DIR) -> None:
-    current_fd = os.open(".", _directory_open_flags())
+    expanded_root = os.path.expanduser(output_root)
+    if os.path.isabs(expanded_root):
+        start_path = os.path.sep
+        root_parts = _split_path_parts(os.path.abspath(expanded_root))
+    else:
+        start_path = "."
+        root_parts = _split_path_parts(expanded_root)
+
+    current_fd = os.open(start_path, _directory_open_flags())
     try:
-        for part in _split_path_parts(output_root):
+        for part in root_parts:
             next_fd = _open_directory_no_symlink(part, current_fd, create=True)
             os.close(current_fd)
             current_fd = next_fd
