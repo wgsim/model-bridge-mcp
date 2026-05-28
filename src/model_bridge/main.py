@@ -1356,7 +1356,7 @@ async def ask_batch(
         reasoning_effort: Codex-only reasoning effort override.
         mode: 'sequential' (default) or 'parallel'.
         max_concurrency: Max parallel requests when mode='parallel' (default 3).
-        save_path: Optional relative output path under .model_bridge/outputs used to save the combined response body.
+        save_path: Optional relative output path under .model_bridge/outputs forwarded to each ask() call to save that prompt's response body.
         force_model: If True, skip failover chain.
         timeout_seconds: Per-call timeout in seconds.
         max_output_tokens: Limit response tokens.
