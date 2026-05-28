@@ -160,6 +160,10 @@ def _resolve_safe_output_path(path: str, output_root: str = SAFE_OUTPUT_DIR) -> 
     if not relative_parts or any(part == ".." for part in relative_parts):
         return None, f"[SECURITY ERROR] save_path must stay within '{output_root}'."
 
+    output_root_parts = _split_path_parts(os.path.expanduser(output_root))
+    if output_root_parts and relative_parts[: len(output_root_parts)] == output_root_parts:
+        return None, f"[SECURITY ERROR] save_path must not include the '{output_root}' prefix."
+
     root_base = os.path.abspath(os.path.expanduser(output_root))
     current = root_base
     while True:

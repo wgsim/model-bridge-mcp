@@ -90,6 +90,16 @@ def test_save_to_file_rejects_parent_traversal(tmp_path, monkeypatch):
     assert out.startswith("[SECURITY ERROR]")
 
 
+def test_save_to_file_rejects_redundant_output_root_prefix(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    out = main_module.save_to_file("hello", ".model_bridge/outputs/reports/result.txt")
+
+    saved = tmp_path / ".model_bridge" / "outputs" / ".model_bridge" / "outputs" / "reports" / "result.txt"
+    assert out.startswith("[SECURITY ERROR]")
+    assert not saved.exists()
+
+
 def test_save_to_file_allows_dotdot_prefixed_directory_name(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
