@@ -437,8 +437,10 @@ Integration smoke coverage:
   - `archive/coder_ai_allocator_v1.1.py`
 - New entrypoint:
   - `src/model_bridge/main.py`
+- `save_path` now accepts a relative output path only. The response is persisted under `.model_bridge/outputs/`; absolute paths and traversal are rejected.
+- Callers that previously passed absolute paths should switch to a relative destination such as `reports/run-1.txt` and read the result from `.model_bridge/outputs/reports/run-1.txt`.
 - Existing tool signatures are preserved:
   - `ask_chatgpt_cli(prompt, save_path=None, force_model=False, model=None, reasoning_effort=None)`
   - `ask_gemini_cli(prompt, save_path=None, force_model=False, model=None, reasoning_effort=None)`
   - `ask_claude_code(prompt, save_path=None, force_model=False, model=None, reasoning_effort=None)`
-  - `ask_ollama(prompt, save_path=None, model=\"default\")`
+  - `ask_ollama(prompt, save_path=None, model="default")`
