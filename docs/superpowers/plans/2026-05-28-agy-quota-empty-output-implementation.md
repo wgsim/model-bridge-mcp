@@ -110,6 +110,48 @@ def test_agy_zero_exit_with_empty_output_is_conservative_provider_error():
 
 ```python
 @pytest.mark.anyio
+async def test_agy_run_async_zero_exit_with_stderr_quota_marker_is_explicit_provider_error():
+    adapter = SubprocessAdapter(_build_agy_config()["commands"])
+
+    class _Proc:
+        returncode = 0
+        async def communicate(self, input=None):
+            return b"", b"usage limit reached"
+
+    async def _fake_exec(*args, **kwargs):
+        return _Proc()
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), patch(
+        "asyncio.create_subprocess_exec", side_effect=_fake_exec
+    ):
+        ok, output = await adapter.run_async("agy", [], "hello")
+
+    assert ok is False
+    assert output == "[PROVIDER ERROR] agy quota or rate-limit exceeded."
+
+
+@pytest.mark.anyio
+async def test_agy_run_async_zero_exit_with_nonquota_stderr_is_explicit_provider_error():
+    adapter = SubprocessAdapter(_build_agy_config()["commands"])
+
+    class _Proc:
+        returncode = 0
+        async def communicate(self, input=None):
+            return b"", b"session unavailable"
+
+    async def _fake_exec(*args, **kwargs):
+        return _Proc()
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), patch(
+        "asyncio.create_subprocess_exec", side_effect=_fake_exec
+    ):
+        ok, output = await adapter.run_async("agy", [], "hello")
+
+    assert ok is False
+    assert output == "[PROVIDER ERROR] agy returned no usable stdout response. stderr=session unavailable"
+
+
+@pytest.mark.anyio
 async def test_agy_run_async_zero_exit_with_empty_output_is_conservative_provider_error():
     adapter = SubprocessAdapter(_build_agy_config()["commands"])
 
@@ -181,6 +223,11 @@ _AGY_QUOTA_MARKERS = (
 )
 
 
+def _looks_like_agy_provider_error(text: str) -> bool:
+    lowered = text.strip().lower()
+    return lowered.startswith(("error:", "provider error:", "quota exceeded", "rate limit exceeded", "usage limit reached", "http 429", "429 too many requests"))
+
+
 def _classify_agy_result(returncode: int, stdout: str, stderr: str) -> tuple[bool, str]:
     stdout_text = stdout.strip()
     stderr_text = stderr.strip()
@@ -190,7 +237,7 @@ def _classify_agy_result(returncode: int, stdout: str, stderr: str) -> tuple[boo
     if any(marker in stderr_lower for marker in _AGY_QUOTA_MARKERS):
         return False, "[PROVIDER ERROR] agy quota or rate-limit exceeded."
 
-    if stdout_text and any(marker in stdout_lower for marker in _AGY_QUOTA_MARKERS):
+    if stdout_text and _looks_like_agy_provider_error(stdout_text) and any(marker in stdout_lower for marker in _AGY_QUOTA_MARKERS):
         return False, "[PROVIDER ERROR] agy quota or rate-limit exceeded."
 
     if returncode == 0 and not stdout_text and stderr_text:
@@ -265,7 +312,8 @@ conda run --no-capture-output -n model-bridge-mcp_dev bash -lc 'cd "/Users/wsim/
 Expected:
 - PASS
 - existing success, timeout, model-override, and warning-path tests remain green
-- direct `run_async` classification coverage is green in addition to `ask_agy_cli` propagation coverage
+- direct `run_async` classification coverage is green for quota markers, stderr-only diagnostics, and empty-output handling
+- `ask_agy_cli` propagation coverage is green for the conservative empty-output contract
 
 - [ ] **Step 6: Commit Task 2**
 
