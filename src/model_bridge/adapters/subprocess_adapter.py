@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Mapping, Sequence, Tuple
@@ -464,7 +465,7 @@ class SubprocessAdapter(CLIAdapter):
             if now - ts < self._REASONING_PROBE_CACHE_TTL:
                 return status, message
 
-        ok, err, full_cmd, full_input = self._prepare_command(
+        ok, err, full_cmd, full_input, _ = self._prepare_command(
             service_name,
             ["--model", model_name, "--reasoning-effort", normalized_effort],
             "ping",
@@ -509,6 +510,23 @@ class SubprocessAdapter(CLIAdapter):
         re.compile(r"^Server '.+' supports resource updates\. Listening for changes\.\.\.$"),
         re.compile(r"^Hook registry initialized with \d+ hook entries$"),
     )
+    _AGY_QUOTA_PATTERNS = (
+        re.compile(r"\bquota exceeded\b", re.IGNORECASE),
+        re.compile(r"\brate limit exceeded\b", re.IGNORECASE),
+        re.compile(r"\busage limit reached\b", re.IGNORECASE),
+        re.compile(r"\b429 too many requests\b", re.IGNORECASE),
+        re.compile(r"\bhttp 429\b", re.IGNORECASE),
+        re.compile(r"\bcode 429\b", re.IGNORECASE),
+        re.compile(r"\bresource_exhausted\b", re.IGNORECASE),
+        re.compile(r"\bindividual quota reached\b", re.IGNORECASE),
+    )
+    _AGY_PROVIDER_ERROR_PREFIXES = (
+        "error:",
+        "fatal:",
+        "failed:",
+        "provider error:",
+        "[error]",
+    )
 
     @classmethod
     def _strip_known_noise_lines(cls, text: str) -> str:
@@ -522,18 +540,79 @@ class SubprocessAdapter(CLIAdapter):
             cleaned_lines.append(line)
         return "\n".join(cleaned_lines).strip()
 
+    @classmethod
+    def _agy_contains_quota_marker(cls, text: str) -> bool:
+        return any(pattern.search(text) for pattern in cls._AGY_QUOTA_PATTERNS)
+
+    @classmethod
+    def _agy_stdout_looks_like_provider_error(cls, text: str) -> bool:
+        lowered = text.lower()
+        return lowered.startswith(cls._AGY_PROVIDER_ERROR_PREFIXES)
+
+    @classmethod
+    def _classify_agy_zero_exit(
+        cls, stdout: str, stderr: str, log_text: str = ""
+    ) -> tuple[bool, str]:
+        cleaned_stdout = cls._strip_known_noise_lines(stdout.strip())
+        cleaned_stderr = cls._strip_known_noise_lines(stderr.strip())
+        cleaned_log = cls._strip_known_noise_lines(log_text.strip())
+
+        if cleaned_stderr and cls._agy_contains_quota_marker(cleaned_stderr):
+            return False, "[PROVIDER ERROR] agy quota or rate-limit exceeded."
+        if (
+            cleaned_stdout
+            and cls._agy_stdout_looks_like_provider_error(cleaned_stdout)
+            and cls._agy_contains_quota_marker(cleaned_stdout)
+        ):
+            return False, "[PROVIDER ERROR] agy quota or rate-limit exceeded."
+        if cleaned_stdout:
+            return True, cleaned_stdout
+        if cleaned_stderr:
+            return False, f"[PROVIDER ERROR] agy returned no usable stdout response. stderr={cleaned_stderr}"
+        if cleaned_log and cls._agy_contains_quota_marker(cleaned_log):
+            return False, "[PROVIDER ERROR] agy quota or rate-limit exceeded."
+        return False, (
+            "[PROVIDER ERROR] agy returned no output "
+            "(possible quota/rate-limit or empty provider response)."
+        )
+
+    @staticmethod
+    def _create_temp_log_file() -> str:
+        with tempfile.NamedTemporaryFile(
+            prefix="model-bridge-agy-", suffix=".log", delete=False
+        ) as handle:
+            return handle.name
+
+    @staticmethod
+    def _read_temp_log_file(log_path: str | None) -> str:
+        if not log_path:
+            return ""
+        try:
+            return Path(log_path).read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _cleanup_temp_log_file(log_path: str | None) -> None:
+        if not log_path:
+            return
+        try:
+            Path(log_path).unlink(missing_ok=True)
+        except OSError:
+            return
+
     def _prepare_command(
         self, service_name: str, args: Sequence[str], input_text: str
-    ) -> Tuple[bool, str, list[str], str]:
+    ) -> Tuple[bool, str, list[str], str, str | None]:
         config = self.cli_config.get(service_name, {})
         cmd_base = list(config.get("exec", []))
         if not cmd_base:
-            return False, f"Configuration Error: No command defined for {service_name}", [], ""
+            return False, f"Configuration Error: No command defined for {service_name}", [], "", None
         lookup_path = _resolve_exec_search_path(self.env)
         if not shutil.which(cmd_base[0], path=lookup_path):
             hint = INSTALL_HINTS.get(cmd_base[0], "")
             hint_suffix = f" Install: {hint}" if hint else ""
-            return False, f"System Error: Command '{cmd_base[0]}' not found.{hint_suffix}", [], ""
+            return False, f"System Error: Command '{cmd_base[0]}' not found.{hint_suffix}", [], "", None
         if self.apply_system_suffix_for.get(service_name, True):
             full_input = input_text + self.system_suffix
         else:
@@ -542,17 +621,18 @@ class SubprocessAdapter(CLIAdapter):
         if service_name == "codex":
             ok, err, rewritten_args = self._rewrite_codex_args(rewritten_args)
             if not ok:
-                return False, err, [], ""
+                return False, err, [], "", None
         elif service_name == "gemini":
             ok, err, rewritten_args = self._rewrite_gemini_args(rewritten_args)
             if not ok:
-                return False, err, [], ""
+                return False, err, [], "", None
         elif service_name == "claude_code":
             ok, err, rewritten_args = self._rewrite_claude_args(rewritten_args)
             if not ok:
-                return False, err, [], ""
+                return False, err, [], "", None
         full_cmd = cmd_base + rewritten_args
         stdin_input = full_input
+        agy_log_path: str | None = None
         # agy execution details
         if service_name == "agy":
             if any(flag in cmd_base for flag in ("-p", "--print", "--prompt")):
@@ -560,6 +640,8 @@ class SubprocessAdapter(CLIAdapter):
                 idx = full_cmd.index(prompt_flag)
                 full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
                 stdin_input = ""
+            agy_log_path = self._create_temp_log_file()
+            full_cmd = full_cmd + ["--log-file", agy_log_path]
             if "--dangerously-skip-permissions" in full_cmd:
                 logger.warning(
                     "[WARNING] 'agy' provider is running with '--dangerously-skip-permissions', "
@@ -578,7 +660,7 @@ class SubprocessAdapter(CLIAdapter):
         ):
             full_cmd = full_cmd + [full_input]
             stdin_input = ""
-        return True, "", full_cmd, stdin_input
+        return True, "", full_cmd, stdin_input, agy_log_path
 
 
     @staticmethod
@@ -681,7 +763,9 @@ class SubprocessAdapter(CLIAdapter):
         timeout_seconds: float | None = None,
         strip_noise: bool = True,
     ) -> Tuple[bool, str]:
-        ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
+        ok, err, full_cmd, full_input, agy_log_path = self._prepare_command(
+            service_name, args, input_text
+        )
         if not ok:
             return False, err
         effective_timeout = timeout_seconds
@@ -691,7 +775,6 @@ class SubprocessAdapter(CLIAdapter):
             else:
                 effective_timeout = self.timeout_seconds
         try:
-
             result = subprocess.run(
                 full_cmd,
                 capture_output=True,
@@ -711,8 +794,16 @@ class SubprocessAdapter(CLIAdapter):
             return False, self._format_timeout_error(service_name, timeout_value, details)
         except Exception as exc:
             return False, str(exc)
+        finally:
+            if service_name == "agy":
+                agy_log_text = self._read_temp_log_file(agy_log_path)
+                self._cleanup_temp_log_file(agy_log_path)
+            else:
+                agy_log_text = ""
 
         if result.returncode == 0:
+            if service_name == "agy":
+                return self._classify_agy_zero_exit(result.stdout, result.stderr, agy_log_text)
             output = result.stdout.strip()
             if strip_noise:
                 output = self._strip_known_noise_lines(output)
@@ -730,7 +821,9 @@ class SubprocessAdapter(CLIAdapter):
         timeout_seconds: float | None = None,
         strip_noise: bool = True,
     ) -> Tuple[bool, str]:
-        ok, err, full_cmd, full_input = self._prepare_command(service_name, args, input_text)
+        ok, err, full_cmd, full_input, agy_log_path = self._prepare_command(
+            service_name, args, input_text
+        )
         if not ok:
             return False, err
         effective_timeout = timeout_seconds
@@ -740,7 +833,6 @@ class SubprocessAdapter(CLIAdapter):
             else:
                 effective_timeout = self.timeout_seconds
         try:
-
             proc = await asyncio.create_subprocess_exec(
                 *full_cmd,
                 stdin=asyncio.subprocess.PIPE,
@@ -764,10 +856,18 @@ class SubprocessAdapter(CLIAdapter):
             return False, self._format_timeout_error(service_name, effective_timeout, details)
         except Exception as exc:
             return False, str(exc)
+        finally:
+            if service_name == "agy":
+                agy_log_text = self._read_temp_log_file(agy_log_path)
+                self._cleanup_temp_log_file(agy_log_path)
+            else:
+                agy_log_text = ""
 
         stdout = stdout_bytes.decode("utf-8", errors="replace")
         stderr = stderr_bytes.decode("utf-8", errors="replace")
         if proc.returncode == 0:
+            if service_name == "agy":
+                return self._classify_agy_zero_exit(stdout, stderr, agy_log_text)
             output = stdout.strip()
             if strip_noise:
                 output = self._strip_known_noise_lines(output)
