@@ -375,6 +375,37 @@ def test_run_places_gemini_prompt_before_model_flag_args():
     assert run_mock.call_args.kwargs["input"] == ""
 
 
+def test_prepare_command_places_agy_prompt_last_after_managed_flags():
+    adapter = SubprocessAdapter(
+        {
+            "agy": {
+                "exec": ["agy", "-p", "--dangerously-skip-permissions"],
+                "health": ["agy", "--version"],
+            }
+        }
+    )
+
+    with patch("shutil.which", return_value="/usr/bin/agy"), patch.object(
+        SubprocessAdapter, "_create_temp_log_file", return_value="/tmp/agy.log"
+    ):
+        ok, err, full_cmd, stdin_input, agy_log_path = adapter._prepare_command(
+            "agy", [], "--leading-dash"
+        )
+
+    assert ok is True
+    assert err == ""
+    assert full_cmd == [
+        "agy",
+        "--dangerously-skip-permissions",
+        "--log-file",
+        "/tmp/agy.log",
+        "-p",
+        "--leading-dash",
+    ]
+    assert stdin_input == ""
+    assert agy_log_path == "/tmp/agy.log"
+
+
 def test_run_rejects_reasoning_effort_for_gemini_subprocess():
     adapter = SubprocessAdapter(
         {"gemini": {"exec": ["gemini", "-p"], "health": ["gemini", "--version"]}},

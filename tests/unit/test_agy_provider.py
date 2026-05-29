@@ -27,14 +27,14 @@ def _build_agy_config():
     }
 
 def test_agy_subprocess_argument_ordering_and_warning_log():
-    # agy expects prompt immediately after print flag when running non-interactively
+    # agy print mode should keep managed flags before -p and place the prompt last.
     adapter = SubprocessAdapter(
         _build_agy_config()["commands"],
         timeout_seconds=120.0,
         agy_timeout_seconds=300.0,
     )
     completed = subprocess.CompletedProcess(
-        args=["agy", "-p", "--dangerously-skip-permissions"],
+        args=["agy", "--dangerously-skip-permissions", "--log-file", "/tmp/agy.log", "-p", "what is 1+1"],
         returncode=0,
         stdout="agy-run-success\n",
         stderr="warning: non-fatal message",
@@ -50,11 +50,12 @@ def test_agy_subprocess_argument_ordering_and_warning_log():
     run_mock.assert_called_once()
     called_cmd = run_mock.call_args.args[0]
     prompt_idx = called_cmd.index("-p")
-    assert called_cmd[prompt_idx + 1] == "what is 1+1"
-    assert "--dangerously-skip-permissions" in called_cmd
-    log_idx = called_cmd.index("--log-file")
-    assert log_idx > prompt_idx + 1
-    assert called_cmd[log_idx + 1]
+    managed_log_idx = called_cmd.index("--log-file")
+    assert called_cmd[0] == "agy"
+    assert called_cmd[1] == "--dangerously-skip-permissions"
+    assert called_cmd[managed_log_idx + 1]
+    assert managed_log_idx < prompt_idx
+    assert called_cmd[-2:] == ["-p", "what is 1+1"]
 
     # Assert Codex recommendation: runtime warning for skip permissions was emitted
     warn_mock.assert_called_once()
@@ -129,11 +130,11 @@ def test_agy_rejects_preconfigured_log_file_flag(exec_args):
     run_mock.assert_not_called()
 
 
-@pytest.mark.parametrize("prompt", ["--log-file", "--log-file=example"])
+@pytest.mark.parametrize("prompt", ["--log-file", "--log-file=example", "--leading-dash-prompt"])
 def test_agy_allows_prompt_values_that_look_like_log_file_flags(prompt):
     adapter = SubprocessAdapter(_build_agy_config()["commands"])
     completed = subprocess.CompletedProcess(
-        args=["agy", "-p", "--dangerously-skip-permissions"],
+        args=["agy", "--dangerously-skip-permissions", "--log-file", "/tmp/agy.log", "-p", prompt],
         returncode=0,
         stdout="agy-run-success\n",
         stderr="",
@@ -147,13 +148,11 @@ def test_agy_allows_prompt_values_that_look_like_log_file_flags(prompt):
     assert output == "agy-run-success"
     run_mock.assert_called_once()
     called_cmd = run_mock.call_args.args[0]
+    managed_log_idx = called_cmd.index("--log-file")
     prompt_idx = called_cmd.index("-p")
-    assert called_cmd[prompt_idx + 1] == prompt
-    log_indices = [idx for idx, arg in enumerate(called_cmd) if arg == "--log-file"]
-    assert log_indices
-    managed_log_idx = log_indices[-1]
-    assert managed_log_idx > prompt_idx + 1
     assert called_cmd[managed_log_idx + 1]
+    assert managed_log_idx < prompt_idx
+    assert called_cmd[-2:] == ["-p", prompt]
 
 
 def test_agy_subprocess_applies_correct_timeout():
