@@ -128,6 +128,34 @@ def test_agy_rejects_preconfigured_log_file_flag(exec_args):
     )
     run_mock.assert_not_called()
 
+
+@pytest.mark.parametrize("prompt", ["--log-file", "--log-file=example"])
+def test_agy_allows_prompt_values_that_look_like_log_file_flags(prompt):
+    adapter = SubprocessAdapter(_build_agy_config()["commands"])
+    completed = subprocess.CompletedProcess(
+        args=["agy", "-p", "--dangerously-skip-permissions"],
+        returncode=0,
+        stdout="agy-run-success\n",
+        stderr="",
+    )
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), \
+         patch("subprocess.run", return_value=completed) as run_mock:
+        ok, output = adapter.run("agy", [], prompt)
+
+    assert ok is True
+    assert output == "agy-run-success"
+    run_mock.assert_called_once()
+    called_cmd = run_mock.call_args.args[0]
+    prompt_idx = called_cmd.index("-p")
+    assert called_cmd[prompt_idx + 1] == prompt
+    log_indices = [idx for idx, arg in enumerate(called_cmd) if arg == "--log-file"]
+    assert log_indices
+    managed_log_idx = log_indices[-1]
+    assert managed_log_idx > prompt_idx + 1
+    assert called_cmd[managed_log_idx + 1]
+
+
 def test_agy_subprocess_applies_correct_timeout():
     adapter = SubprocessAdapter(
         _build_agy_config()["commands"],

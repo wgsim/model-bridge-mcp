@@ -640,16 +640,16 @@ class SubprocessAdapter(CLIAdapter):
         agy_log_path: str | None = None
         # agy execution details
         if service_name == "agy":
-            if any(flag in cmd_base for flag in ("-p", "--print", "--prompt")):
-                prompt_flag = next(flag for flag in ("-p", "--print", "--prompt") if flag in cmd_base)
-                idx = full_cmd.index(prompt_flag)
-                full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
-                stdin_input = ""
             if any(arg == "--log-file" or arg.startswith("--log-file=") for arg in full_cmd):
                 return False, (
                     "Configuration Error: 'agy' command already includes --log-file; "
                     "remove it from config because model-bridge manages temporary agy log files."
                 ), [], "", None
+            if any(flag in cmd_base for flag in ("-p", "--print", "--prompt")):
+                prompt_flag = next(flag for flag in ("-p", "--print", "--prompt") if flag in cmd_base)
+                idx = full_cmd.index(prompt_flag)
+                full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
+                stdin_input = ""
             agy_log_path = self._create_temp_log_file()
             full_cmd = full_cmd + ["--log-file", agy_log_path]
             if "--dangerously-skip-permissions" in full_cmd:
