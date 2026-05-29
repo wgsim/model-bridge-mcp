@@ -62,15 +62,15 @@ def test_agy_zero_exit_with_stderr_quota_marker_is_explicit_provider_error():
     assert output == "[PROVIDER ERROR] agy quota or rate-limit exceeded."
 ```
 
-- [ ] **Step 2: Add failing test for stdout quota marker detection**
+- [ ] **Step 2: Add failing tests for stdout quota marker classification**
 
 ```python
-def test_agy_zero_exit_with_stdout_quota_marker_is_explicit_provider_error():
+def test_agy_zero_exit_with_stdout_quota_marker_in_provider_error_shape_is_explicit_provider_error():
     adapter = SubprocessAdapter(_build_agy_config()["commands"])
     completed = subprocess.CompletedProcess(
         args=["agy", "-p"],
         returncode=0,
-        stdout="usage limit reached",
+        stdout="ERROR: usage limit reached",
         stderr="",
     )
 
@@ -81,6 +81,24 @@ def test_agy_zero_exit_with_stdout_quota_marker_is_explicit_provider_error():
 
     assert ok is False
     assert output == "[PROVIDER ERROR] agy quota or rate-limit exceeded."
+
+
+def test_agy_zero_exit_with_normal_stdout_mentioning_quota_marker_still_succeeds():
+    adapter = SubprocessAdapter(_build_agy_config()["commands"])
+    completed = subprocess.CompletedProcess(
+        args=["agy", "-p"],
+        returncode=0,
+        stdout="The phrase usage limit reached appears in docs.",
+        stderr="",
+    )
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), patch(
+        "subprocess.run", return_value=completed
+    ):
+        ok, output = adapter.run("agy", [], "hello")
+
+    assert ok is True
+    assert output == "The phrase usage limit reached appears in docs."
 ```
 
 - [ ] **Step 3: Add failing test for empty-output ambiguous failure**
@@ -188,7 +206,7 @@ async def test_ask_agy_cli_propagates_async_empty_output_provider_error():
 
 Run:
 ```bash
-conda run --no-capture-output -n model-bridge-mcp_dev bash -lc 'cd "/Users/wsim/git_clones/model-bridge-mcp/.claude/worktrees/security-first-remediation" && PYTHONPATH=src python -m pytest -q tests/unit/test_agy_provider.py -k "quota_marker or empty_output"'
+conda run --no-capture-output -n model-bridge-mcp_dev bash -lc 'cd "/Users/wsim/git_clones/model-bridge-mcp/.claude/worktrees/security-first-remediation" && PYTHONPATH=src python -m pytest -q tests/unit/test_agy_provider.py -k "quota_marker or empty_output or nonquota_stderr"'
 ```
 
 Expected:
