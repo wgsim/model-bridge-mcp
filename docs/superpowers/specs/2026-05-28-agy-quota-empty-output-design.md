@@ -43,12 +43,14 @@ Detection should be applied in this order:
 
 1. **Known quota markers**
    - inspect stderr first, then stdout
-   - use a small allowlist of substrings such as:
-     - `quota`
-     - `rate limit`
-     - `usage limit`
-     - `limit exceeded`
-   - keep the marker matcher easy to extend
+   - use a small allowlist of context-specific markers such as:
+     - `quota exceeded`
+     - `rate limit exceeded`
+     - `usage limit reached`
+     - `429`
+     - known provider-specific quota phrases if observed in real output
+   - avoid generic single words like `quota`, which can appear in a normal model answer
+   - keep stderr matching broader than stdout matching so user content is less likely to be misclassified
 
 2. **Timeout**
    - preserve timeout handling as a distinct provider failure
@@ -56,8 +58,10 @@ Detection should be applied in this order:
 3. **Non-zero exit**
    - preserve explicit subprocess failure capture
 
-4. **Exit 0 + empty output**
-   - classify as `possible quota/rate-limit or empty provider response`
+4. **Exit 0 + empty stdout**
+   - if stdout is empty and stderr contains a known quota marker, classify as confirmed quota/rate-limit
+   - if stdout is empty and stderr contains non-quota diagnostics, classify as provider failure and preserve the stderr context
+   - if both stdout and stderr are empty, classify as `possible quota/rate-limit or empty provider response`
 
 ## Implementation shape
 Keep the change tightly scoped to `agy` execution surfaces.
@@ -83,12 +87,14 @@ Avoid introducing a large new abstraction unless multiple providers will reuse i
 Add focused unit coverage for `agy` only.
 
 Required cases:
-1. stderr contains known quota marker → confirmed quota/rate-limit error
-2. stdout contains known quota marker → confirmed quota/rate-limit error
-3. exit 0 + empty stdout/stderr → possible quota/rate-limit or empty provider response
-4. normal stdout body → existing success path preserved
-5. non-zero exit with stderr → existing failure path preserved
-6. timeout path → existing timeout behavior preserved
+1. stderr contains a known quota marker → confirmed quota/rate-limit error
+2. stdout contains a known quota marker in a provider-error shaped response → confirmed quota/rate-limit error
+3. exit 0 + empty stdout + non-quota stderr → explicit provider failure preserving stderr context
+4. exit 0 + empty stdout/stderr → possible quota/rate-limit or empty provider response
+5. normal stdout body → existing success path preserved
+6. non-zero exit with stderr → existing failure path preserved
+7. timeout path → existing timeout behavior preserved
+8. async-path coverage for `SubprocessAdapter.run_async` or `ask_agy_cli` covering confirmed quota, stderr-only diagnostics, and empty-output handling
 
 ## Logging and diagnostics
 If practical within the same diff, log or preserve enough context to differentiate:
