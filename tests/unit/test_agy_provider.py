@@ -60,6 +60,74 @@ def test_agy_subprocess_argument_ordering_and_warning_log():
     warn_mock.assert_called_once()
     assert "--dangerously-skip-permissions" in warn_mock.call_args.args[0]
 
+
+def test_agy_temp_log_reader_replaces_invalid_utf8(tmp_path):
+    log_path = tmp_path / "agy.log"
+    log_path.write_bytes(b"before\xffafter")
+
+    output = SubprocessAdapter._read_temp_log_file(str(log_path))
+
+    assert output == "before�after"
+
+
+def test_agy_strip_noise_false_preserves_success_stdout():
+    adapter = SubprocessAdapter(_build_agy_config()["commands"])
+    stdout = "Loaded cached credentials.\nagy-run-success\n"
+    completed = subprocess.CompletedProcess(
+        args=["agy", "-p"],
+        returncode=0,
+        stdout=stdout,
+        stderr="",
+    )
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), \
+         patch("subprocess.run", return_value=completed):
+        ok, output = adapter.run("agy", [], "hello", strip_noise=False)
+
+    assert ok is True
+    assert output == stdout
+
+
+def test_agy_strip_noise_false_still_classifies_using_cleaned_stdout():
+    adapter = SubprocessAdapter(_build_agy_config()["commands"])
+    completed = subprocess.CompletedProcess(
+        args=["agy", "-p"],
+        returncode=0,
+        stdout="Loaded cached credentials.\n",
+        stderr="non-fatal stderr",
+    )
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), \
+         patch("subprocess.run", return_value=completed):
+        ok, output = adapter.run("agy", [], "hello", strip_noise=False)
+
+    assert ok is False
+    assert output == "[PROVIDER ERROR] agy returned no usable stdout response. stderr=non-fatal stderr"
+
+
+@pytest.mark.parametrize(
+    "exec_args",
+    [
+        ["agy", "-p", "--log-file", "configured.log"],
+        ["agy", "-p", "--log-file=configured.log"],
+    ],
+)
+def test_agy_rejects_preconfigured_log_file_flag(exec_args):
+    config = _build_agy_config()["commands"]
+    config["agy"]["exec"] = exec_args
+    adapter = SubprocessAdapter(config)
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), \
+         patch("subprocess.run") as run_mock:
+        ok, output = adapter.run("agy", [], "hello")
+
+    assert ok is False
+    assert output == (
+        "Configuration Error: 'agy' command already includes --log-file; "
+        "remove it from config because model-bridge manages temporary agy log files."
+    )
+    run_mock.assert_not_called()
+
 def test_agy_subprocess_applies_correct_timeout():
     adapter = SubprocessAdapter(
         _build_agy_config()["commands"],

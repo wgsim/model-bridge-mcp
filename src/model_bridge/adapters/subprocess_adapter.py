@@ -551,7 +551,12 @@ class SubprocessAdapter(CLIAdapter):
 
     @classmethod
     def _classify_agy_zero_exit(
-        cls, stdout: str, stderr: str, log_text: str = ""
+        cls,
+        stdout: str,
+        stderr: str,
+        log_text: str = "",
+        *,
+        strip_noise: bool = True,
     ) -> tuple[bool, str]:
         cleaned_stdout = cls._strip_known_noise_lines(stdout.strip())
         cleaned_stderr = cls._strip_known_noise_lines(stderr.strip())
@@ -566,7 +571,7 @@ class SubprocessAdapter(CLIAdapter):
         ):
             return False, "[PROVIDER ERROR] agy quota or rate-limit exceeded."
         if cleaned_stdout:
-            return True, cleaned_stdout
+            return True, cleaned_stdout if strip_noise else stdout
         if cleaned_stderr:
             return False, f"[PROVIDER ERROR] agy returned no usable stdout response. stderr={cleaned_stderr}"
         if cleaned_log and cls._agy_contains_quota_marker(cleaned_log):
@@ -588,7 +593,7 @@ class SubprocessAdapter(CLIAdapter):
         if not log_path:
             return ""
         try:
-            return Path(log_path).read_text(encoding="utf-8")
+            return Path(log_path).read_text(encoding="utf-8", errors="replace")
         except OSError:
             return ""
 
@@ -640,6 +645,11 @@ class SubprocessAdapter(CLIAdapter):
                 idx = full_cmd.index(prompt_flag)
                 full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
                 stdin_input = ""
+            if any(arg == "--log-file" or arg.startswith("--log-file=") for arg in full_cmd):
+                return False, (
+                    "Configuration Error: 'agy' command already includes --log-file; "
+                    "remove it from config because model-bridge manages temporary agy log files."
+                ), [], "", None
             agy_log_path = self._create_temp_log_file()
             full_cmd = full_cmd + ["--log-file", agy_log_path]
             if "--dangerously-skip-permissions" in full_cmd:
@@ -803,7 +813,9 @@ class SubprocessAdapter(CLIAdapter):
 
         if result.returncode == 0:
             if service_name == "agy":
-                return self._classify_agy_zero_exit(result.stdout, result.stderr, agy_log_text)
+                return self._classify_agy_zero_exit(
+                    result.stdout, result.stderr, agy_log_text, strip_noise=strip_noise
+                )
             output = result.stdout.strip()
             if strip_noise:
                 output = self._strip_known_noise_lines(output)
@@ -867,7 +879,9 @@ class SubprocessAdapter(CLIAdapter):
         stderr = stderr_bytes.decode("utf-8", errors="replace")
         if proc.returncode == 0:
             if service_name == "agy":
-                return self._classify_agy_zero_exit(stdout, stderr, agy_log_text)
+                return self._classify_agy_zero_exit(
+                    stdout, stderr, agy_log_text, strip_noise=strip_noise
+                )
             output = stdout.strip()
             if strip_noise:
                 output = self._strip_known_noise_lines(output)
