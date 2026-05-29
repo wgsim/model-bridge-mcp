@@ -47,7 +47,8 @@ Detection should be applied in this order:
      - `quota exceeded`
      - `rate limit exceeded`
      - `usage limit reached`
-     - `429`
+     - `429 too many requests`
+     - `http 429`
      - known provider-specific quota phrases if observed in real output
    - avoid generic single words like `quota`, which can appear in a normal model answer
    - keep stderr matching broader than stdout matching so user content is less likely to be misclassified
@@ -94,7 +95,8 @@ Required cases:
 5. normal stdout body → existing success path preserved
 6. non-zero exit with stderr → existing failure path preserved
 7. timeout path → existing timeout behavior preserved
-8. async-path coverage for `SubprocessAdapter.run_async` or `ask_agy_cli` covering confirmed quota, stderr-only diagnostics, and empty-output handling
+8. direct async-path coverage for `SubprocessAdapter.run_async` covering confirmed quota, stderr-only diagnostics, and empty-output handling
+9. optional propagation coverage at `ask_agy_cli` to ensure the async adapter classification reaches the public tool surface
 
 ## Logging and diagnostics
 If practical within the same diff, log or preserve enough context to differentiate:
