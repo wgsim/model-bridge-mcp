@@ -3,6 +3,8 @@ import subprocess
 import asyncio
 from unittest.mock import patch
 
+import pytest
+
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
 
 
@@ -375,11 +377,12 @@ def test_run_places_gemini_prompt_before_model_flag_args():
     assert run_mock.call_args.kwargs["input"] == ""
 
 
-def test_prepare_command_places_agy_prompt_last_after_managed_flags():
+@pytest.mark.parametrize("prompt_flag", ["-p", "--print", "--prompt"])
+def test_prepare_command_places_agy_prompt_last_after_managed_flags(prompt_flag):
     adapter = SubprocessAdapter(
         {
             "agy": {
-                "exec": ["agy", "-p", "--dangerously-skip-permissions"],
+                "exec": ["agy", prompt_flag, "--dangerously-skip-permissions"],
                 "health": ["agy", "--version"],
             }
         }
@@ -399,7 +402,7 @@ def test_prepare_command_places_agy_prompt_last_after_managed_flags():
         "--dangerously-skip-permissions",
         "--log-file",
         "/tmp/agy.log",
-        "-p",
+        prompt_flag,
         "--leading-dash",
     ]
     assert stdin_input == ""
