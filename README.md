@@ -192,7 +192,7 @@ conda run -n model-bridge-mcp_dev bash -lc 'model-bridge'
 ```
 
 For GUI or non-interactive MCP clients, make sure the client launches inside the same environment or can resolve the installed script on `PATH`.
-If that is not practical, use an equivalent wrapper such as `conda run -n model-bridge-mcp_dev model-bridge` or an absolute interpreter/script path in the client configuration.
+If that is not practical, use an equivalent wrapper such as `conda run --no-capture-output -n model-bridge-mcp_dev model-bridge` (or `--live-stream`) or an absolute interpreter/script path in the client configuration.
 
 ## Ollama Model Selection
 `ask_ollama` now uses alias-first model resolution.
