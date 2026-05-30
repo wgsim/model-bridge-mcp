@@ -20,7 +20,13 @@ main.py (MCP tools)
 conda create -n model-bridge-mcp_dev python=3.11 -y
 conda activate model-bridge-mcp_dev
 python -m pip install mcp PyYAML pytest
+python -m pip install -e .
 ```
+
+Notes:
+- `python -m pip install -e .` installs the `model-bridge` console script declared in `pyproject.toml`.
+- `mcp_config.json` uses that console script (`command: "model-bridge"`).
+- If you intentionally skip the editable install, source-only execution still works via `PYTHONPATH=src python -m model_bridge.main`.
 
 ## Configuration
 The default configuration file is `src/model_bridge/config/default.yaml`.
@@ -32,6 +38,7 @@ The default configuration file is `src/model_bridge/config/default.yaml`.
 - `runtime.system_suffix`: CLI prompt suffix
 - `runtime.apply_system_suffix`: per-service suffix application policy
 - `runtime.transport_mode`: `subprocess` (default) or `sdk` (scaffold)
+- `runtime.save_debug_meta_on_save`: persist sanitized debug-meta sidecars when `save_path` is used (`false` by default)
 - `runtime.extra_path`: additional PATH directories for CLI discovery (see below)
 
 ### CLI Path Discovery
@@ -122,6 +129,14 @@ Config loader verification:
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridge.config.config_loader --pretty'
 ```
 
+Debug-meta save toggle example:
+```yaml
+runtime:
+  save_debug_meta_on_save: true
+```
+
+When enabled, `save_path` writes still save the main response under `.model_bridge/outputs/...`, and an additional sanitized debug-meta sidecar is persisted for troubleshooting.
+
 ## Plugins
 
 model-bridge-mcp supports a plugin architecture for extending with custom AI providers.
@@ -166,8 +181,14 @@ Runtime initialization note:
 - OAuth refresh automation (OpenAI/Gemini/Anthropic): set `<PROVIDER>_OAUTH_TOKEN_FILE` with token metadata and optionally `<PROVIDER>_OAUTH_*` refresh env (`TOKEN_URL`, `REFRESH_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `SCOPE`).
 
 ### MCP run
+Source checkout form:
 ```bash
 conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src python -m model_bridge.main'
+```
+
+Installed console-script form (matches `mcp_config.json`):
+```bash
+conda run -n model-bridge-mcp_dev bash -lc 'model-bridge'
 ```
 
 ## Ollama Model Selection

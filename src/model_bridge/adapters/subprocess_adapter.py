@@ -472,7 +472,8 @@ class SubprocessAdapter(CLIAdapter):
         )
         if not ok:
             result = ("unknown", err)
-            self._reasoning_probe_cache[cache_key] = (*result, now)
+            cache_value: tuple[str, str, float] = (result[0], result[1], now)
+            self._reasoning_probe_cache[cache_key] = cache_value
             return result
         try:
             proc = subprocess.run(
@@ -486,11 +487,13 @@ class SubprocessAdapter(CLIAdapter):
             )
         except subprocess.TimeoutExpired:
             result = ("unknown", "probe timed out")
-            self._reasoning_probe_cache[cache_key] = (*result, now)
+            cache_value: tuple[str, str, float] = (result[0], result[1], now)
+            self._reasoning_probe_cache[cache_key] = cache_value
             return result
         except Exception as exc:
             result = ("unknown", str(exc))
-            self._reasoning_probe_cache[cache_key] = (*result, now)
+            cache_value: tuple[str, str, float] = (result[0], result[1], now)
+            self._reasoning_probe_cache[cache_key] = cache_value
             return result
 
         output = (proc.stdout + proc.stderr).strip()
@@ -500,7 +503,8 @@ class SubprocessAdapter(CLIAdapter):
             result = ("unsupported", output or "runtime probe rejected effort")
         else:
             result = ("unknown", output)
-        self._reasoning_probe_cache[cache_key] = (*result, now)
+        cache_value: tuple[str, str, float] = (result[0], result[1], now)
+        self._reasoning_probe_cache[cache_key] = cache_value
         return result
 
     _NOISE_LINE_PATTERNS = (
@@ -846,6 +850,7 @@ class SubprocessAdapter(CLIAdapter):
                 effective_timeout = self.agy_timeout_seconds
             else:
                 effective_timeout = self.timeout_seconds
+        proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *full_cmd,
@@ -862,6 +867,8 @@ class SubprocessAdapter(CLIAdapter):
                     timeout=effective_timeout,
                 )
         except asyncio.TimeoutError:
+            if proc is None:
+                return False, self._format_timeout_error(service_name, effective_timeout, "")
             proc.kill()
             stdout_bytes, stderr_bytes = await proc.communicate()
             details = stdout_bytes.decode("utf-8", errors="replace") + stderr_bytes.decode(
