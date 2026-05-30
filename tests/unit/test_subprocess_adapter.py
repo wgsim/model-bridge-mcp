@@ -294,6 +294,21 @@ def test_run_async_returns_timeout_error_when_subprocess_hangs():
     assert proc.killed is True
 
 
+def test_run_async_returns_timeout_error_when_process_creation_times_out():
+    adapter = SubprocessAdapter(_build_config(), timeout_seconds=2.0)
+
+    async def _fake_exec(*args, **kwargs):
+        raise asyncio.TimeoutError
+
+    with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
+        "asyncio.create_subprocess_exec", side_effect=_fake_exec
+    ):
+        ok, output = asyncio.run(adapter.run_async("ollama", ["llama3.2"], "hello"))
+
+    assert ok is False
+    assert output.startswith("Timeout Error: Command 'ollama' exceeded 2.0s")
+
+
 def test_timeout_error_includes_interactive_auth_hint_for_gemini():
     adapter = SubprocessAdapter({"gemini": {"exec": ["gemini"], "health": ["gemini", "--version"]}})
     timeout_exc = subprocess.TimeoutExpired(
