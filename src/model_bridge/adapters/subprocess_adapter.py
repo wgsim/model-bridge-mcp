@@ -370,7 +370,12 @@ class SubprocessAdapter(CLIAdapter):
             self._extra_path,
         )
 
-        if expanded_path != current_path:
+        path_changed = expanded_path != base_path
+        if path_present:
+            if expanded_path != current_path:
+                self.env["PATH"] = expanded_path
+                logger.info("PATH expanded with discovered CLI directories")
+        elif path_changed:
             self.env["PATH"] = expanded_path
             logger.info("PATH expanded with discovered CLI directories")
 

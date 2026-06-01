@@ -209,6 +209,35 @@ def test_run_with_extra_path_preserves_default_exec_lookup_when_env_omits_path(t
 
 
 
+def test_run_without_added_paths_preserves_absent_path_env():
+    completed = subprocess.CompletedProcess(
+        args=["ollama", "run"],
+        returncode=0,
+        stdout="ok-output\n",
+        stderr="",
+    )
+
+    def fake_discover(_cmd):
+        return None
+
+    def fake_which(command, path=None):
+        assert command == "ollama"
+        assert path == os.pathsep.join(os.get_exec_path({}))
+        return "/usr/bin/ollama"
+
+    with patch.object(subprocess_adapter_module, "_discover_cli_path", side_effect=fake_discover), \
+         patch("shutil.which", side_effect=fake_which), patch(
+             "subprocess.run", return_value=completed
+         ) as run_mock:
+        adapter = SubprocessAdapter(_build_config(), env={})
+        ok, output = adapter.run("ollama", ["llama3.2"], "hello")
+
+    assert ok is True
+    assert output == "ok-output"
+    assert "PATH" not in run_mock.call_args.kwargs["env"]
+
+
+
 def test_run_handles_subprocess_exception():
     adapter = SubprocessAdapter(_build_config())
     with patch("shutil.which", return_value="/usr/bin/ollama"), patch(
