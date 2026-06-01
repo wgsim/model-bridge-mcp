@@ -361,10 +361,12 @@ class SubprocessAdapter(CLIAdapter):
         if not commands_to_discover and not self._extra_path:
             return
 
+        path_present = "PATH" in self.env
         current_path = self.env.get("PATH", "")
+        base_path = current_path if path_present else _resolve_exec_search_path(self.env)
         expanded_path = _expand_path_with_discovered_clis(
             list(commands_to_discover),
-            current_path,
+            base_path,
             self._extra_path,
         )
 

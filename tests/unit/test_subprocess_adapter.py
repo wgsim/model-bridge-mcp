@@ -179,29 +179,33 @@ def test_expand_path_with_discovered_clis_uses_os_pathsep(monkeypatch, current_p
 def test_run_with_extra_path_preserves_default_exec_lookup_when_env_omits_path(tmp_path):
     extra_path = tmp_path / "bin"
     extra_path.mkdir()
-    adapter = SubprocessAdapter(_build_config(), env={}, extra_path=[str(extra_path)])
-    adapter.env.pop("PATH", None)
-    adapter._expand_path_with_cli_discovery()
     completed = subprocess.CompletedProcess(
         args=["ollama", "run"],
         returncode=0,
         stdout="ok-output\n",
         stderr="",
     )
+    expected_default_path = os.pathsep.join(os.get_exec_path({}))
+    expected_path = f"{extra_path}{os.pathsep}{expected_default_path}"
+
+    def fake_discover(_cmd):
+        return None
+
     def fake_which(command, path=None):
         assert command == "ollama"
-        assert path is not None
-        assert path.startswith(f"{extra_path}{os.pathsep}")
-        assert not path.endswith(os.pathsep)
+        assert path == expected_path
         return "/usr/bin/ollama"
 
-    with patch("shutil.which", side_effect=fake_which), patch(
-        "subprocess.run", return_value=completed
-    ):
+    with patch.object(subprocess_adapter_module, "_discover_cli_path", side_effect=fake_discover), \
+         patch("shutil.which", side_effect=fake_which), patch(
+             "subprocess.run", return_value=completed
+         ) as run_mock:
+        adapter = SubprocessAdapter(_build_config(), env={}, extra_path=[str(extra_path)])
         ok, output = adapter.run("ollama", ["llama3.2"], "hello")
 
     assert ok is True
     assert output == "ok-output"
+    assert run_mock.call_args.kwargs["env"]["PATH"] == expected_path
 
 
 
