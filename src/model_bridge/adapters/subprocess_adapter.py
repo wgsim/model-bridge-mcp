@@ -294,14 +294,16 @@ def _expand_path_with_discovered_clis(
         Expanded PATH with discovered CLI directories prepended
     """
     paths_to_add: list[str] = []
+    current_entries = current_path.split(os.pathsep) if current_path else []
 
     # 1. User-specified extra paths (highest priority)
     if extra_paths:
         for p in extra_paths:
             expanded = Path(p).expanduser()
-            if expanded.exists() and str(expanded) not in current_path:
-                if str(expanded) not in paths_to_add:
-                    paths_to_add.append(str(expanded))
+            expanded_str = str(expanded)
+            if expanded.exists() and expanded_str not in current_entries:
+                if expanded_str not in paths_to_add:
+                    paths_to_add.append(expanded_str)
                     logger.info("Added user-specified path: %s", expanded)
 
     # 2. Auto-discovered CLI paths
@@ -309,12 +311,12 @@ def _expand_path_with_discovered_clis(
         path = _discover_cli_path(cmd)
         if path:
             cmd_dir = os.path.dirname(path)
-            if cmd_dir not in current_path and cmd_dir not in paths_to_add:
+            if cmd_dir not in current_entries and cmd_dir not in paths_to_add:
                 paths_to_add.append(cmd_dir)
                 logger.info("Discovered CLI path for '%s': %s", cmd, cmd_dir)
 
     if paths_to_add:
-        return ":".join(paths_to_add) + ":" + current_path
+        return os.pathsep.join(paths_to_add + current_entries)
     return current_path
 
 
@@ -574,6 +576,8 @@ class SubprocessAdapter(CLIAdapter):
             and cls._agy_contains_quota_marker(cleaned_stdout)
         ):
             return False, "[PROVIDER ERROR] agy quota or rate-limit exceeded."
+        if cleaned_stdout and cls._agy_stdout_looks_like_provider_error(cleaned_stdout):
+            return False, f"[PROVIDER ERROR] {cleaned_stdout}"
         if cleaned_stdout:
             return True, cleaned_stdout if strip_noise else stdout
         if cleaned_stderr:

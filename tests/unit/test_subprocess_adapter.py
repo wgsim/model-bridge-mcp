@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from model_bridge.adapters import subprocess_adapter as subprocess_adapter_module
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
 
 
@@ -129,6 +130,50 @@ def test_run_uses_subprocess_exec_path_when_env_omits_path():
 
     assert ok is True
     assert output == "ok-output"
+
+
+def test_expand_path_with_discovered_clis_treats_entries_atomically(tmp_path):
+    extra_path = tmp_path / "bin"
+    extra_path.mkdir()
+    sibling_like_path = tmp_path / "bin2"
+    sibling_like_path.mkdir()
+
+    expanded = subprocess_adapter_module._expand_path_with_discovered_clis(
+        [],
+        f"{sibling_like_path}{os.pathsep}/usr/bin",
+        [str(extra_path)],
+    )
+
+    assert expanded.startswith(f"{extra_path}{os.pathsep}{sibling_like_path}{os.pathsep}")
+
+
+@pytest.mark.parametrize(
+    ("current_path", "extra_paths", "expected"),
+    [
+        ("C:/Windows/System32", ["C:/Tools/Bin"], f"C:/Tools/Bin{os.pathsep}C:/Windows/System32"),
+        ("", ["C:/Tools/Bin"], "C:/Tools/Bin"),
+    ],
+)
+def test_expand_path_with_discovered_clis_uses_os_pathsep(monkeypatch, current_path, extra_paths, expected):
+    class _FakePath:
+        def __init__(self, value):
+            self.value = value
+
+        def expanduser(self):
+            return self
+
+        def exists(self):
+            return True
+
+        def __str__(self):
+            return self.value
+
+    monkeypatch.setattr(subprocess_adapter_module, "Path", _FakePath)
+    monkeypatch.setattr(subprocess_adapter_module.os, "pathsep", ";")
+
+    expanded = subprocess_adapter_module._expand_path_with_discovered_clis([], current_path, extra_paths)
+
+    assert expanded == expected.replace(":", ";") if os.pathsep == ":" else expected
 
 
 def test_run_handles_subprocess_exception():

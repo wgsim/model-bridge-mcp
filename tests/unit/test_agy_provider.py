@@ -309,6 +309,23 @@ def test_agy_zero_exit_with_stdout_quota_marker_in_provider_error_shape_is_expli
     assert output == "[PROVIDER ERROR] agy quota or rate-limit exceeded."
 
 
+def test_agy_zero_exit_with_stdout_provider_error_shape_is_explicit_provider_error():
+    adapter = SubprocessAdapter(_build_agy_config()["commands"])
+    completed = subprocess.CompletedProcess(
+        args=["agy", "-p"],
+        returncode=0,
+        stdout="ERROR: session unavailable",
+        stderr="",
+    )
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), \
+         patch("subprocess.run", return_value=completed):
+        ok, output = adapter.run("agy", [], "hello")
+
+    assert ok is False
+    assert output == "[PROVIDER ERROR] ERROR: session unavailable"
+
+
 def test_agy_zero_exit_with_normal_stdout_mentioning_quota_marker_still_succeeds():
     adapter = SubprocessAdapter(_build_agy_config()["commands"])
     completed = subprocess.CompletedProcess(
@@ -445,6 +462,27 @@ async def test_agy_run_async_zero_exit_with_nonquota_stderr_is_explicit_provider
 
     assert ok is False
     assert output == "[PROVIDER ERROR] agy returned no usable stdout response. stderr=session unavailable"
+
+
+@pytest.mark.anyio
+async def test_agy_run_async_zero_exit_with_stdout_provider_error_shape_is_explicit_provider_error():
+    adapter = SubprocessAdapter(_build_agy_config()["commands"])
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self, input=None):
+            return b"ERROR: session unavailable", b""
+
+    async def _fake_exec(*args, **kwargs):
+        return _Proc()
+
+    with patch("shutil.which", return_value="/usr/local/bin/agy"), \
+         patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+        ok, output = await adapter.run_async("agy", [], "hello")
+
+    assert ok is False
+    assert output == "[PROVIDER ERROR] ERROR: session unavailable"
 
 
 @pytest.mark.anyio
