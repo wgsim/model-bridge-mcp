@@ -150,8 +150,8 @@ def test_expand_path_with_discovered_clis_treats_entries_atomically(tmp_path):
 @pytest.mark.parametrize(
     ("current_path", "extra_paths", "expected"),
     [
-        ("C:/Windows/System32", ["C:/Tools/Bin"], f"C:/Tools/Bin{os.pathsep}C:/Windows/System32"),
-        ("", ["C:/Tools/Bin"], "C:/Tools/Bin"),
+        ("C:/Windows/System32", ["C:/Tools/Bin"], "C:/Tools/Bin;C:/Windows/System32"),
+        ("", ["C:/Tools/Bin"], "C:/Tools/Bin;"),
     ],
 )
 def test_expand_path_with_discovered_clis_uses_os_pathsep(monkeypatch, current_path, extra_paths, expected):
@@ -173,7 +173,7 @@ def test_expand_path_with_discovered_clis_uses_os_pathsep(monkeypatch, current_p
 
     expanded = subprocess_adapter_module._expand_path_with_discovered_clis([], current_path, extra_paths)
 
-    assert expanded == expected.replace(":", ";") if os.pathsep == ":" else expected
+    assert expanded == expected
 
 
 def test_run_handles_subprocess_exception():

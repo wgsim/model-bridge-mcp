@@ -294,7 +294,7 @@ def _expand_path_with_discovered_clis(
         Expanded PATH with discovered CLI directories prepended
     """
     paths_to_add: list[str] = []
-    current_entries = current_path.split(os.pathsep) if current_path else []
+    current_entries = current_path.split(os.pathsep)
 
     # 1. User-specified extra paths (highest priority)
     if extra_paths:
@@ -576,8 +576,6 @@ class SubprocessAdapter(CLIAdapter):
             and cls._agy_contains_quota_marker(cleaned_stdout)
         ):
             return False, "[PROVIDER ERROR] agy quota or rate-limit exceeded."
-        if cleaned_stdout and cls._agy_stdout_looks_like_provider_error(cleaned_stdout):
-            return False, f"[PROVIDER ERROR] {cleaned_stdout}"
         if cleaned_stdout:
             return True, cleaned_stdout if strip_noise else stdout
         if cleaned_stderr:
