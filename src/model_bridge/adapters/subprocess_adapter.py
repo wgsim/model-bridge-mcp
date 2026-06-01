@@ -294,7 +294,7 @@ def _expand_path_with_discovered_clis(
         Expanded PATH with discovered CLI directories prepended
     """
     paths_to_add: list[str] = []
-    current_entries = current_path.split(os.pathsep)
+    current_entries = current_path.split(os.pathsep) if current_path else []
 
     # 1. User-specified extra paths (highest priority)
     if extra_paths:

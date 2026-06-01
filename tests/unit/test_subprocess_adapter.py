@@ -151,7 +151,7 @@ def test_expand_path_with_discovered_clis_treats_entries_atomically(tmp_path):
     ("current_path", "extra_paths", "expected"),
     [
         ("C:/Windows/System32", ["C:/Tools/Bin"], "C:/Tools/Bin;C:/Windows/System32"),
-        ("", ["C:/Tools/Bin"], "C:/Tools/Bin;"),
+        ("", ["C:/Tools/Bin"], "C:/Tools/Bin"),
     ],
 )
 def test_expand_path_with_discovered_clis_uses_os_pathsep(monkeypatch, current_path, extra_paths, expected):
@@ -174,6 +174,35 @@ def test_expand_path_with_discovered_clis_uses_os_pathsep(monkeypatch, current_p
     expanded = subprocess_adapter_module._expand_path_with_discovered_clis([], current_path, extra_paths)
 
     assert expanded == expected
+
+
+def test_run_with_extra_path_preserves_default_exec_lookup_when_env_omits_path(tmp_path):
+    extra_path = tmp_path / "bin"
+    extra_path.mkdir()
+    adapter = SubprocessAdapter(_build_config(), env={}, extra_path=[str(extra_path)])
+    adapter.env.pop("PATH", None)
+    adapter._expand_path_with_cli_discovery()
+    completed = subprocess.CompletedProcess(
+        args=["ollama", "run"],
+        returncode=0,
+        stdout="ok-output\n",
+        stderr="",
+    )
+    def fake_which(command, path=None):
+        assert command == "ollama"
+        assert path is not None
+        assert path.startswith(f"{extra_path}{os.pathsep}")
+        assert not path.endswith(os.pathsep)
+        return "/usr/bin/ollama"
+
+    with patch("shutil.which", side_effect=fake_which), patch(
+        "subprocess.run", return_value=completed
+    ):
+        ok, output = adapter.run("ollama", ["llama3.2"], "hello")
+
+    assert ok is True
+    assert output == "ok-output"
+
 
 
 def test_run_handles_subprocess_exception():
