@@ -31,7 +31,7 @@ Assumption: this repo does not define a dedicated build wrapper. Use standard Py
 ```bash
 conda create -n model-bridge-mcp_dev python=3.11 -y
 conda activate model-bridge-mcp_dev
-python -m pip install -e ".[dev]" pytest pre-commit build
+python -m pip install -e ".[dev]" pytest pre-commit
 ```
 
 ### Run the app
@@ -86,9 +86,10 @@ CI runs the same test command plus pre-commit. There is no separate ruff/mypy ta
 
 ### Build artifacts
 
-Use the standard packaging command if you need a wheel or sdist:
+Use the standard packaging command if you need a wheel or sdist. Install `build` first if it is not already available in your environment:
 
 ```bash
+python -m pip install build
 python -m build
 ```
 
