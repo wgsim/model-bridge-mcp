@@ -31,7 +31,7 @@ Assumption: this repo does not define a dedicated build wrapper. Use standard Py
 ```bash
 conda create -n model-bridge-mcp_dev python=3.11 -y
 conda activate model-bridge-mcp_dev
-python -m pip install -e ".[dev]" pytest pre-commit
+python -m pip install -e ".[dev]" pytest pre-commit build
 ```
 
 ### Run the app
@@ -96,7 +96,7 @@ python -m build
 
 - The checked-in development environment is Python 3.11 (`ENVIRONMENT.md` and `environment/model-bridge-mcp_dev.yml` are the reference). `pyproject.toml` allows Python `>=3.10`, but CI and the documented dev env use 3.11.
 - If installed dependencies change in the dev environment, refresh `environment/model-bridge-mcp_dev.yml` in the same change.
-- Response saves are written under `.model_bridge/outputs`, and debug metadata is written under `.model_bridge/debug_meta`. Keep the reported destination strings aligned with those real persisted locations.
+- Response saves are written under `.model_bridge/outputs`, and debug metadata is written under `.model_bridge/tmp`. Keep the reported destination strings aligned with those real persisted locations.
 - `save_path` and output handling are security-sensitive: the sanitizer and save helpers deliberately reject protected system paths and symlink tricks.
 - `README.md`, `CONTRIBUTING.md`, and `ENVIRONMENT.md` contain the project-specific setup and operational details that should stay in sync with implementation changes.
 - Local artifact roots such as `.cross_audit/`, `.serena/`, `.review_runtime*/`, `.review_runtime_abs/`, `.antigravitycli/`, and `.claude/worktrees/` are intentionally untracked; treat them as disposable local state unless a task explicitly says to preserve or inspect them.
