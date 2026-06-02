@@ -14,4 +14,12 @@ dist/
 # Local diagnostic and agent untracked files
 scratch/
 .hgp/
+.cross_audit/
+.serena/
+.review_runtime/
+.review_runtime2/
+.review_runtime4/
+.review_runtime_abs/
+.antigravitycli/
+.claude/worktrees/
 uv.lock
