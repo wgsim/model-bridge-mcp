@@ -92,9 +92,19 @@ git commit -m "test: stabilize provider env discovery unit coverage"
 - Modify: `tests/unit/test_preflight.py`
 - Test: `tests/unit/test_preflight.py`
 
-- [ ] **Step 1: Add an empty-value filtering test immediately after the multiple-values test**
+- [ ] **Step 1: Update the import block and add an empty-value filtering test immediately after the multiple-values test**
 
-Insert this exact test below `test_discover_provider_env_vars_collects_multiple_values`:
+First, update the import block at the top of `tests/unit/test_preflight.py` to include `shutil`:
+
+```python
+import os
+import shutil
+import subprocess
+import time
+from unittest.mock import patch
+```
+
+Then insert this exact test below `test_discover_provider_env_vars_collects_multiple_values`:
 
 ```python
 def test_discover_provider_env_vars_ignores_blank_values():
@@ -139,9 +149,34 @@ def test_discover_provider_env_vars_falls_back_to_next_shell_after_non_zero_resu
     assert run_mock.call_args_list[1].args[0][0] == "zsh"
 ```
 
-- [ ] **Step 3: Add a no-output fallback test that proves the helper continues when the first shell returns no usable stdout**
+- [ ] **Step 3: Add a controlled real-shell smoke test so login-shell invocation remains covered**
 
 Insert this exact test below the non-zero fallback test:
+
+```python
+def test_discover_provider_env_vars_real_bash_login_shell_reads_profile(tmp_path):
+    bash_path = shutil.which("bash")
+    assert bash_path is not None
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".bash_profile").write_text('export OPENAI_API_KEY="from-profile"\n')
+
+    with patch("model_bridge.adapters.subprocess_adapter._LOGIN_SHELLS", [bash_path]), patch.dict(
+        os.environ,
+        {"HOME": str(home), "OPENAI_API_KEY": ""},
+        clear=False,
+    ):
+        discovered = _discover_provider_env_vars(timeout=1.0)
+
+    assert discovered["OPENAI_API_KEY"] == "from-profile"
+```
+
+This keeps one explicit login-shell path under test without depending on CI runner startup files.
+
+- [ ] **Step 4: Add a no-output fallback test that proves the helper continues when the first shell returns no usable stdout**
+
+Insert this exact test below the real-shell smoke test:
 
 ```python
 def test_discover_provider_env_vars_falls_back_to_next_shell_after_empty_output():
@@ -165,7 +200,7 @@ def test_discover_provider_env_vars_falls_back_to_next_shell_after_empty_output(
     assert run_mock.call_count == 2
 ```
 
-- [ ] **Step 4: Run the full preflight test file to verify the env-discovery tests stay deterministic alongside existing preflight coverage**
+- [ ] **Step 5: Run the full preflight test file to verify the env-discovery tests stay deterministic alongside existing preflight coverage**
 
 Run:
 
@@ -179,7 +214,7 @@ Expected:
 all tests in tests/unit/test_preflight.py pass
 ```
 
-- [ ] **Step 5: Commit the expanded deterministic env-discovery coverage**
+- [ ] **Step 6: Commit the expanded deterministic env-discovery coverage**
 
 ```bash
 git add tests/unit/test_preflight.py
@@ -281,11 +316,12 @@ Replace the parsing block inside `_discover_provider_env_vars()` with this exact
 ```python
             if result.returncode == 0 and result.stdout.strip():
                 discovered.update(_parse_provider_env_output(result.stdout))
-                if discovered:
-                    break  # Success, no need to try other shells
+                break  # Preserve existing first-non-empty-stdout semantics
 ```
 
 Keep the surrounding timeout / file-not-found / generic exception handling intact.
+
+This task is intentionally behavior-preserving. Do **not** broaden retry behavior after non-empty but unusable stdout in the same change.
 
 - [ ] **Step 3: Add direct parser coverage to the preflight test file**
 
@@ -361,15 +397,17 @@ Replace the current `var_checks` / `cmd` construction with this exact shape:
             vars_list = " ".join(_PROVIDER_ENV_VARS)
             cmd = (
                 f'for var in {vars_list}; do '
-                f'value=$(printenv "$var" 2>/dev/null || true); '
-                f'[ -n "$value" ] && echo "$var=$value"; '
+                f'eval "value=\\${{{{var}}}}"; '
+                f'[ -n "$value" ] && printf "%s=%s\\n" "$var" "$value"; '
                 f'done'
             )
 ```
 
-- [ ] **Step 2: Add or update one subprocess-mocked test to assert the helper still parses multiple values correctly after the command rewrite**
+This proposal preserves discovery of shell variables defined by login-shell profile scripts, not only exported environment entries.
 
-Use this exact expectation in a direct test if no existing test already proves it after Task 4:
+- [ ] **Step 2: Add or update one subprocess-mocked test that inspects the rewritten command string as well as the parsed output**
+
+Use this exact test if no earlier test already inspects the command passed to `subprocess.run`:
 
 ```python
 def test_discover_provider_env_vars_collects_multiple_values_after_command_rewrite():
@@ -380,13 +418,17 @@ def test_discover_provider_env_vars_collects_multiple_values_after_command_rewri
         stderr="",
     )
 
-    with patch("subprocess.run", return_value=completed):
+    with patch("subprocess.run", return_value=completed) as run_mock:
         discovered = _discover_provider_env_vars(timeout=1.0)
 
     assert discovered == {
         "GOOGLE_API_KEY": "google-token",
         "OPENAI_API_KEY": "openai-token",
     }
+    invoked = run_mock.call_args.args[0]
+    assert invoked[1] == "-lc"
+    assert "for var in" in invoked[2]
+    assert 'eval "value=' in invoked[2]
 ```
 
 - [ ] **Step 3: Re-run validation if and only if this task was needed**
