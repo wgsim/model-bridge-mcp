@@ -92,13 +92,12 @@ git commit -m "test: stabilize provider env discovery unit coverage"
 - Modify: `tests/unit/test_preflight.py`
 - Test: `tests/unit/test_preflight.py`
 
-- [ ] **Step 1: Update the import block and add an empty-value filtering test immediately after the multiple-values test**
+- [ ] **Step 1: Keep the import block minimal and add an empty-value filtering test immediately after the multiple-values test**
 
-First, update the import block at the top of `tests/unit/test_preflight.py` to include `shutil`:
+The top-level imports should remain:
 
 ```python
 import os
-import shutil
 import subprocess
 import time
 from unittest.mock import patch
@@ -149,34 +148,9 @@ def test_discover_provider_env_vars_falls_back_to_next_shell_after_non_zero_resu
     assert run_mock.call_args_list[1].args[0][0] == "zsh"
 ```
 
-- [ ] **Step 3: Add a controlled real-shell smoke test so login-shell invocation remains covered**
+- [ ] **Step 3: Add a no-output fallback test that proves the helper continues when the first shell returns no usable stdout**
 
 Insert this exact test below the non-zero fallback test:
-
-```python
-def test_discover_provider_env_vars_real_bash_login_shell_reads_profile(tmp_path):
-    bash_path = shutil.which("bash")
-    assert bash_path is not None
-
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / ".bash_profile").write_text('export OPENAI_API_KEY="from-profile"\n')
-
-    with patch("model_bridge.adapters.subprocess_adapter._LOGIN_SHELLS", [bash_path]), patch.dict(
-        os.environ,
-        {"HOME": str(home), "OPENAI_API_KEY": ""},
-        clear=False,
-    ):
-        discovered = _discover_provider_env_vars(timeout=1.0)
-
-    assert discovered["OPENAI_API_KEY"] == "from-profile"
-```
-
-This keeps one explicit login-shell path under test without depending on CI runner startup files.
-
-- [ ] **Step 4: Add a no-output fallback test that proves the helper continues when the first shell returns no usable stdout**
-
-Insert this exact test below the real-shell smoke test:
 
 ```python
 def test_discover_provider_env_vars_falls_back_to_next_shell_after_empty_output():
@@ -200,7 +174,7 @@ def test_discover_provider_env_vars_falls_back_to_next_shell_after_empty_output(
     assert run_mock.call_count == 2
 ```
 
-- [ ] **Step 5: Run the full preflight test file to verify the env-discovery tests stay deterministic alongside existing preflight coverage**
+- [ ] **Step 4: Run the full preflight test file to verify the env-discovery tests stay deterministic alongside existing preflight coverage**
 
 Run:
 
@@ -214,7 +188,7 @@ Expected:
 all tests in tests/unit/test_preflight.py pass
 ```
 
-- [ ] **Step 6: Commit the expanded deterministic env-discovery coverage**
+- [ ] **Step 5: Commit the expanded deterministic env-discovery coverage**
 
 ```bash
 git add tests/unit/test_preflight.py
@@ -380,89 +354,13 @@ git commit -m "refactor: extract provider env discovery parser"
 
 ---
 
-### Task 5: Optional Phase 2b — simplify shell command construction only if Task 4 still leaves ambiguity
-
-**Files:**
-- Modify: `src/model_bridge/adapters/subprocess_adapter.py:119-127`
-- Modify: `tests/unit/test_preflight.py`
-- Test: `tests/unit/test_preflight.py`
-
-> **Only do this if Task 4 uncovered a concrete ambiguity in the current chained `&&` / `||` command shape. Do not perform this task as cleanup-for-cleanup's-sake.**
-
-- [ ] **Step 1: Replace the chained command string with a shell loop snippet**
-
-Replace the current `var_checks` / `cmd` construction with this exact shape:
-
-```python
-            vars_list = " ".join(_PROVIDER_ENV_VARS)
-            cmd = (
-                f'for var in {vars_list}; do '
-                f'eval "value=\\${{{{var}}}}"; '
-                f'[ -n "$value" ] && printf "%s=%s\\n" "$var" "$value"; '
-                f'done'
-            )
-```
-
-This proposal preserves discovery of shell variables defined by login-shell profile scripts, not only exported environment entries.
-
-- [ ] **Step 2: Add or update one subprocess-mocked test that inspects the rewritten command string as well as the parsed output**
-
-Use this exact test if no earlier test already inspects the command passed to `subprocess.run`:
-
-```python
-def test_discover_provider_env_vars_collects_multiple_values_after_command_rewrite():
-    completed = subprocess.CompletedProcess(
-        args=["bash", "-lc", "env-check"],
-        returncode=0,
-        stdout="GOOGLE_API_KEY=google-token\nOPENAI_API_KEY=openai-token\n",
-        stderr="",
-    )
-
-    with patch("subprocess.run", return_value=completed) as run_mock:
-        discovered = _discover_provider_env_vars(timeout=1.0)
-
-    assert discovered == {
-        "GOOGLE_API_KEY": "google-token",
-        "OPENAI_API_KEY": "openai-token",
-    }
-    invoked = run_mock.call_args.args[0]
-    assert invoked[1] == "-lc"
-    assert "for var in" in invoked[2]
-    assert 'eval "value=' in invoked[2]
-```
-
-- [ ] **Step 3: Re-run validation if and only if this task was needed**
-
-Run:
-
-```bash
-conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests/unit/test_preflight.py'
-conda run -n model-bridge-mcp_dev bash -lc 'PYTHONPATH=src pytest -q tests'
-conda run -n model-bridge-mcp_dev bash -lc 'pre-commit run --all-files'
-```
-
-Expected:
-
-```text
-all commands pass
-```
-
-- [ ] **Step 4: Commit the shell-command simplification separately**
-
-```bash
-git add src/model_bridge/adapters/subprocess_adapter.py tests/unit/test_preflight.py
-git commit -m "refactor: simplify provider env discovery shell command"
-```
-
----
-
 ## Spec coverage check
 
 - **CI red recovery:** covered by Tasks 1-3
 - **Environment-independent unit coverage:** covered by Tasks 1-2
 - **Validation against repository gates:** covered by Task 3
 - **Optional helper hardening:** covered by Task 4
-- **Optional command-shape hardening:** covered by Task 5
+- **Shell-command simplification intentionally deferred:** this plan does not redesign the `&&` / `||` command shape; if that work is desired later, write a separate design because quoting and shell-variable semantics are easy to get subtly wrong.
 
 ## Guardrails for the implementer
 
@@ -470,3 +368,4 @@ git commit -m "refactor: simplify provider env discovery shell command"
 - Do not touch `.github/workflows/ci.yml` during Phase 1.
 - Do not widen Phase 1 into runtime behavior changes unless a new reproduction proves a production-facing bug.
 - Keep Phase 2 commits separate from Phase 1 recovery so rollback stays easy.
+- If explicit real-shell verification is still desired after Phase 1, add it later as a separate integration-style change with a scrubbed environment, an absolute shell path, and a timeout larger than 1 second.
