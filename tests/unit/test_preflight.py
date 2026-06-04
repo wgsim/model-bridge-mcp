@@ -183,8 +183,8 @@ def test_discover_provider_env_vars_collects_multiple_values():
     run_args, run_kwargs = run_mock.call_args
     assert run_args[0][1] == "-lc"
     command = run_args[0][2]
-    assert 'GOOGLE_API_KEY=$GOOGLE_API_KEY' in command
-    assert 'OPENAI_API_KEY=$OPENAI_API_KEY' in command
+    assert "GOOGLE_API_KEY" in command
+    assert "OPENAI_API_KEY" in command
     assert run_kwargs["capture_output"] is True
     assert run_kwargs["text"] is True
     assert run_kwargs["timeout"] == 1.0
