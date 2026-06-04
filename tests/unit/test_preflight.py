@@ -193,6 +193,7 @@ def test_discover_provider_env_vars_collects_multiple_values():
     run_mock.assert_called_once()
     run_args, run_kwargs = run_mock.call_args
     assert run_args[0][1] == "-lc"
+    assert run_args[0][2] == _build_provider_env_discovery_command()
     assert run_kwargs["capture_output"] is True
     assert run_kwargs["text"] is True
     assert run_kwargs["timeout"] == 1.0
