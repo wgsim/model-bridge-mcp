@@ -1202,6 +1202,12 @@ async def ask_agy_cli(
             "agy",
             options,
         )
+    # agy has no --model flag; warn if model is provided
+    if model is not None:
+        logger.warning(
+            "agy provider does not support model selection; "
+            "model=%r parameter ignored", model,
+        )
     return await _ask_with_failover(
         prompt,
         default_primary="agy",

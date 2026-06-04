@@ -11,6 +11,7 @@ commands:
   claude_code:
     exec: ["claude", "-p"]
     health: ["claude", "--version"]
+  # Failover chain: agy → codex → ollama
   agy:
     exec: ["agy", "-p"]
     health: ["agy", "--version"]

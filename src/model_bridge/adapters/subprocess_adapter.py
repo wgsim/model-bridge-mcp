@@ -33,6 +33,10 @@ INSTALL_HINTS: dict[str, str] = {
 }
 
 
+# Providers that pass the prompt as a positional argument (not stdin).
+# These CLIs accept the prompt text as a trailing positional arg after flags.
+_POSITIONAL_PROMPT_PROVIDERS = {"claude_code", "agy"}
+
 # Shells to try for login shell discovery (in order of preference)
 _LOGIN_SHELLS = ["bash", "zsh", "sh"]
 
@@ -684,9 +688,10 @@ class SubprocessAdapter(CLIAdapter):
             idx = full_cmd.index(prompt_flag)
             full_cmd = full_cmd[: idx + 1] + [full_input] + full_cmd[idx + 1 :]
             stdin_input = ""
-        # Claude print mode uses positional prompt.
-        elif service_name == "claude_code" and any(
-            flag in cmd_base for flag in ("-p", "--print")
+        # Providers that accept the prompt as a trailing positional argument.
+        elif (
+            service_name in _POSITIONAL_PROMPT_PROVIDERS
+            and any(flag in cmd_base for flag in ("-p", "--print"))
         ):
             full_cmd = full_cmd + [full_input]
             stdin_input = ""
