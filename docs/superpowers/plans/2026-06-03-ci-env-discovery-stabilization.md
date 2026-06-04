@@ -4,7 +4,7 @@
 
 **Goal:** Restore CI to green by removing environment-dependent assumptions from the failing preflight unit test, then leave an optional follow-up path for hardening `_discover_provider_env_vars()` if Phase 1 reveals production-facing ambiguity.
 
-**Architecture:** Phase 1 treats the CI failure as a test-boundary problem, not a workflow or runner problem. Keep the runtime helper contract unchanged and move the unit tests to the subprocess boundary by mocking `subprocess.run()` output directly. Phase 2 is explicitly optional and only starts after Phase 1 validation is green; it decomposes env-var parsing into a smaller pure helper and simplifies the shell command shape without changing the public behavior.
+**Architecture:** Phase 1 treats the CI failure as a test-boundary problem, not a workflow or runner problem. Keep the runtime helper contract unchanged and move the unit tests to the subprocess boundary by mocking `subprocess.run()` output directly. Phase 2 is explicitly optional and only starts after Phase 1 validation is green; within this plan it is limited to parser extraction and behavior-preserving helper cleanup. Any shell-command redesign is intentionally deferred to a separate follow-up design/plan.
 
 **Tech Stack:** Python 3.11, pytest, unittest.mock, GitHub Actions, conda, pre-commit.
 
@@ -19,7 +19,8 @@
 - `src/model_bridge/adapters/subprocess_adapter.py`
   - Owns `_discover_provider_env_vars()`
   - Phase 1 should avoid modifying this file unless a tiny test-enabling change becomes strictly necessary
-  - Phase 2 may add a pure parser helper and a clearer shell command construction path
+  - Phase 2 may add a pure parser helper and behavior-preserving helper cleanup only
+  - Any shell-command construction redesign is out of scope for this plan and should be handled by a separate follow-up design/plan
 - `.github/workflows/ci.yml`
   - Read-only context for this effort
   - Do not modify unless Phase 1 evidence unexpectedly proves the workflow is the correct fix boundary
