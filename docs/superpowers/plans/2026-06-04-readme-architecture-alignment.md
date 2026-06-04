@@ -77,11 +77,19 @@ git commit -m "docs: keep README architecture overview concise"
 - Create: `docs/ARCHITECTURE.md`
 - Verify: `docs/ARCHITECTURE.md`
 
-- [ ] **Step 1: Create `docs/ARCHITECTURE.md` with the approved top-level structure section**
+- [ ] **Step 1: Create the full `docs/ARCHITECTURE.md` file from scratch**
 
-Create `docs/ARCHITECTURE.md` and ensure its `## Top-level structure` block includes this exact structure:
+Create `docs/ARCHITECTURE.md` with this exact content:
 
 ```md
+# Architecture
+
+This document is the repository's high-level architecture reference for `model-bridge-mcp`.
+
+## Purpose
+
+`model-bridge-mcp` is a modular MCP server that routes model-provider requests across CLI and SDK backends with failover, caching, rate limiting, and security checks.
+
 ## Top-level structure
 
 ```text
@@ -102,13 +110,37 @@ model-bridge-mcp/
 ├── schemas/                     # JSON schema artifacts
 └── archive/                     # Historical reference only
 ```
-```
 
-- [ ] **Step 2: Add the execution backend section with env discovery / preflight responsibilities**
+## Runtime layers
 
-Add the following content under `### 4. Execution backend layer`:
+### 1. Entry and tool layer
 
-```md
+- `src/model_bridge/main.py`
+- Registers the MCP tool surface (`ask_*`, `ask`, `ask_batch`, health and inventory helpers).
+- Normalizes user-facing options, builds provider handlers, and coordinates response finalization.
+
+### 2. Runtime assembly layer
+
+- `src/model_bridge/runtime.py`
+- `src/model_bridge/config/config_loader.py`
+- `src/model_bridge/config/default.yaml`
+- Builds the runtime object containing config, adapter, failover manager, and sanitizer.
+- Merges packaged defaults with machine-local overrides from `~/.model_bridge/local.yaml`.
+
+### 3. Core orchestration layer
+
+- `src/model_bridge/core/provider_registry.py`
+- `src/model_bridge/core/plugin_loader.py`
+- `src/model_bridge/core/failover_manager.py`
+- `src/model_bridge/core/batch_executor.py`
+- `src/model_bridge/core/prompt_cache.py`
+- `src/model_bridge/core/session_memory.py`
+- `src/model_bridge/core/rate_limiter.py`
+- `src/model_bridge/core/task_tracker.py`
+- `src/model_bridge/core/response.py`
+- `src/model_bridge/core/streaming.py`
+- Owns request routing, provider capability checks, plugin discovery, failover, prompt/session caching, batch execution, response shaping, and streaming/task lifecycle support.
+
 ### 4. Execution backend layer
 
 - `src/model_bridge/adapters/factory.py`
@@ -117,13 +149,19 @@ Add the following content under `### 4. Execution backend layer`:
 - Selects the transport implementation from `runtime.transport_mode`.
 - Owns provider execution details such as subprocess invocation, SDK invocation, CLI/path discovery, and provider environment-variable discovery / preflight behavior.
 - Keeps provider execution details out of the tool registration layer.
-```
 
-- [ ] **Step 3: Add the verification layer so unit and integration responsibilities stay at the right altitude**
+### 5. Security layer
 
-Add the following content under `### 7. Verification layer`:
+- `src/model_bridge/security/sanitizer.py`
+- Enforces prompt blocking rules, sensitive path protections, and output-destination safety before execution or file save behavior proceeds.
 
-```md
+### 6. Extension layer
+
+- `src/model_bridge/plugins/base.py`
+- `src/model_bridge/plugins/`
+- Defines the provider plugin contract and plugin discovery surface for external providers.
+- Plugin-specific guidance lives in `docs/PLUGIN_GUIDE.md`.
+
 ### 7. Verification layer
 
 - `tests/unit/`
@@ -131,13 +169,22 @@ Add the following content under `### 7. Verification layer`:
 - Unit tests cover focused subsystem behavior such as routing helpers, adapter behavior, response shaping, and command-construction logic.
 - Integration tests verify public MCP tool behavior and higher-level runtime flows.
 - Changes around env discovery / preflight should keep deterministic unit coverage separate from broader runtime-shell behavior checks.
+
+## Request flow
+
+Typical request flow for a tool call:
+
+```text
+MCP client
+  -> src/model_bridge/main.py
+    -> config loader + runtime bootstrap
+    -> provider registry / plugin loader
+    -> failover manager
+    -> adapter factory-selected backend
+    -> subprocess or SDK provider execution
+    -> response formatting / save handling
 ```
 
-- [ ] **Step 4: Add the architectural boundaries section to place env discovery at the adapter/runtime boundary**
-
-Add the following boundary section:
-
-```md
 ## Key architectural boundaries
 
 - **Tool surface vs execution**: `main.py` exposes tools; adapters execute providers.
@@ -146,9 +193,30 @@ Add the following boundary section:
 - **Security as a gate**: sanitizer checks happen before execution and before persisted output handling.
 - **Plugins as extensions**: new providers should integrate through the plugin and provider-registry surfaces rather than by growing ad hoc branching in tool entrypoints.
 - **Env discovery / preflight as execution concerns**: login-shell env discovery, subprocess command construction, and provider preflight behavior belong to the adapter/runtime execution boundary, not the public tool-surface layer.
+
+## Related documents
+
+- `README.md` - setup, usage, and operator-facing overview
+- `CLAUDE.md` - repository guidance for Claude Code contributors
+- `docs/PLUGIN_GUIDE.md` - plugin authoring details
+- `docs/plans/` - implementation and design plans for major architectural changes
 ```
 
-- [ ] **Step 5: Commit the architecture-reference alignment**
+- [ ] **Step 2: Verify the newly created architecture file contains the expected major sections**
+
+Run:
+
+```bash
+rg -n "^## Top-level structure|^## Runtime layers|^### 4\. Execution backend layer|^### 7\. Verification layer|^## Key architectural boundaries" docs/ARCHITECTURE.md
+```
+
+Expected:
+
+```text
+All five headings appear in docs/ARCHITECTURE.md.
+```
+
+- [ ] **Step 3: Commit the architecture-reference alignment**
 
 ```bash
 git add docs/ARCHITECTURE.md
@@ -164,41 +232,63 @@ git commit -m "docs: align architecture reference with current layers"
 - Modify: `docs/ARCHITECTURE.md` if wording drift remains
 - Verify: `README.md`, `docs/ARCHITECTURE.md`, `CLAUDE.md`
 
-- [ ] **Step 1: Compare the two docs using a section-scoped check for README’s `## Architecture` block**
+- [ ] **Step 1: Compare README, ARCHITECTURE, and CLAUDE using a targeted multi-file consistency check**
 
 Run:
 
 ```bash
 python - <<'PY'
 from pathlib import Path
-text = Path('README.md').read_text().splitlines()
+
+readme = Path('README.md').read_text().splitlines()
+arch = Path('docs/ARCHITECTURE.md').read_text()
+claude = Path('CLAUDE.md').read_text()
+
 in_section = False
-for line in text:
+print('== README Architecture section ==')
+for line in readme:
     if line.startswith('## '):
         in_section = line == '## Architecture'
     if in_section:
         print(line)
+
+print('\n== ARCHITECTURE markers ==')
+for marker in [
+    '## Runtime layers',
+    '### 4. Execution backend layer',
+    '## Key architectural boundaries',
+]:
+    print(marker, '->', marker in arch)
+
+print('\n== CLAUDE markers ==')
+for marker in [
+    '## High-level architecture',
+    'src/model_bridge/adapters/',
+    'src/model_bridge/security/',
+]:
+    print(marker, '->', marker in claude)
 PY
 ```
 
 Expected:
 
 ```text
-The README Architecture block contains only the short link sentence and the compact quick map, while deeper structural detail lives in docs/ARCHITECTURE.md.
+The README Architecture section stays compact, docs/ARCHITECTURE.md contains the detailed runtime/layer markers, and CLAUDE.md still contains contributor-facing high-level architecture guidance.
 ```
 
-- [ ] **Step 2: Inspect the whole working tree for doc-only scope**
+- [ ] **Step 2: Inspect file-scoped worktree status and diff for doc-only scope**
 
 Run:
 
 ```bash
-git status --short
+git status --short -- README.md docs/ARCHITECTURE.md
+git diff -- README.md docs/ARCHITECTURE.md
 ```
 
 Expected:
 
 ```text
-Only README.md and docs/ARCHITECTURE.md appear as working-tree changes for this documentation alignment work.
+The working-tree changes for this documentation alignment work are limited to README.md and docs/ARCHITECTURE.md.
 ```
 
 - [ ] **Step 3: Run the repository validation gate before finalizing**
