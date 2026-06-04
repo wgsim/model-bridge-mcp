@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from model_bridge.adapters.subprocess_adapter import (
     SubprocessAdapter,
+    _build_provider_env_discovery_command,
     _discover_provider_env_vars,
 )
 
@@ -164,6 +165,16 @@ class TestPreflightCheck:
         assert msg == "ok"
 
 
+def test_build_provider_env_discovery_command_contains_expected_fragments():
+    command = _build_provider_env_discovery_command()
+
+    assert '[ -n "$GOOGLE_API_KEY" ] && echo "GOOGLE_API_KEY=$GOOGLE_API_KEY"' in command
+    assert '[ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY"' in command
+    assert " || " not in command
+    assert command.count("; ") >= 1
+    assert command.endswith("; true")
+
+
 def test_discover_provider_env_vars_collects_multiple_values():
     completed = subprocess.CompletedProcess(
         args=["bash", "-lc", "env-check"],
@@ -182,9 +193,6 @@ def test_discover_provider_env_vars_collects_multiple_values():
     run_mock.assert_called_once()
     run_args, run_kwargs = run_mock.call_args
     assert run_args[0][1] == "-lc"
-    command = run_args[0][2]
-    assert '[ -n "$GOOGLE_API_KEY" ] && echo "GOOGLE_API_KEY=$GOOGLE_API_KEY"' in command
-    assert '[ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY"' in command
     assert run_kwargs["capture_output"] is True
     assert run_kwargs["text"] is True
     assert run_kwargs["timeout"] == 1.0

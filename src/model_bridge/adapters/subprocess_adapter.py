@@ -96,6 +96,15 @@ def _resolve_exec_search_path(env: Mapping[str, str] | None) -> str:
     return os.pathsep.join(os.get_exec_path(env))
 
 
+def _build_provider_env_discovery_command() -> str:
+    """Build the login-shell command used to print whitelisted provider env vars."""
+    clauses = "; ".join(
+        f'[ -n "${var}" ] && echo "{var}=${var}"'
+        for var in _PROVIDER_ENV_VARS
+    )
+    return f"{clauses}; true"
+
+
 def _discover_provider_env_vars(timeout: float = 3.0) -> dict[str, str]:
     """
     Discover provider authentication env vars from login shell.
@@ -120,11 +129,7 @@ def _discover_provider_env_vars(timeout: float = 3.0) -> dict[str, str]:
         try:
             # Build a command that prints all whitelisted env vars
             # Format: NAME=value (one per line, only if set)
-            var_checks = " || ".join(
-                f'[ -n "${var}" ] && echo "{var}=${var}"'
-                for var in _PROVIDER_ENV_VARS
-            )
-            cmd = f'{var_checks}'
+            cmd = _build_provider_env_discovery_command()
 
             result = subprocess.run(
                 [shell, "-lc", cmd],
