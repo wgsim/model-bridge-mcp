@@ -121,11 +121,13 @@ model-bridge-mcp/
 
 ### 2. Runtime assembly layer
 
+- `src/model_bridge/main.py`
 - `src/model_bridge/runtime.py`
 - `src/model_bridge/config/config_loader.py`
 - `src/model_bridge/config/default.yaml`
-- Builds the runtime object containing config, adapter, failover manager, and sanitizer.
-- Merges packaged defaults with machine-local overrides from `~/.model_bridge/local.yaml`.
+- `main.py` lazily assembles runtime dependencies through `build_runtime()` / `_ensure_runtime()`.
+- `runtime.py` defines the runtime dependency container.
+- `config_loader.py` and `default.yaml` provide packaged configuration plus machine-local override loading from `~/.model_bridge/local.yaml`.
 
 ### 3. Core orchestration layer
 
@@ -202,18 +204,34 @@ MCP client
 - `docs/plans/` - implementation and design plans for major architectural changes
 ```
 
-- [ ] **Step 2: Verify the newly created architecture file contains the expected major sections**
+- [ ] **Step 2: Verify the newly created architecture file contains the expected sections and key body markers**
 
 Run:
 
 ```bash
-rg -n "^## Top-level structure|^## Runtime layers|^### 4\. Execution backend layer|^### 7\. Verification layer|^## Key architectural boundaries" docs/ARCHITECTURE.md
+python - <<'PY'
+from pathlib import Path
+text = Path('docs/ARCHITECTURE.md').read_text()
+markers = [
+    '## Top-level structure',
+    '## Runtime layers',
+    '### 4. Execution backend layer',
+    '### 7. Verification layer',
+    '## Key architectural boundaries',
+    'main.py` lazily assembles runtime dependencies',
+    'provider environment-variable discovery / preflight behavior',
+    'deterministic unit coverage separate from broader runtime-shell behavior checks',
+    'Env discovery / preflight as execution concerns',
+]
+for marker in markers:
+    print(marker, '->', marker in text)
+PY
 ```
 
 Expected:
 
 ```text
-All five headings appear in docs/ARCHITECTURE.md.
+All headings and key body markers print as True.
 ```
 
 - [ ] **Step 3: Commit the architecture-reference alignment**
@@ -276,19 +294,19 @@ Expected:
 The README Architecture section stays compact, docs/ARCHITECTURE.md contains the detailed runtime/layer markers, and CLAUDE.md still contains contributor-facing high-level architecture guidance.
 ```
 
-- [ ] **Step 2: Inspect file-scoped worktree status and diff for doc-only scope**
+- [ ] **Step 2: Inspect whole-worktree status first, then inspect the two documentation files directly**
 
 Run:
 
 ```bash
-git status --short -- README.md docs/ARCHITECTURE.md
+git status --short
 git diff -- README.md docs/ARCHITECTURE.md
 ```
 
 Expected:
 
 ```text
-The working-tree changes for this documentation alignment work are limited to README.md and docs/ARCHITECTURE.md.
+The whole-worktree status shows only README.md and docs/ARCHITECTURE.md as changed for this documentation alignment work, and the scoped diff shows the exact content changes in those two files.
 ```
 
 - [ ] **Step 3: Run the repository validation gate before finalizing**
