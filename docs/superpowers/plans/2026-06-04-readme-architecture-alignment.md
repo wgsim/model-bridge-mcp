@@ -297,19 +297,19 @@ Expected:
 The README Architecture section stays compact, docs/ARCHITECTURE.md contains the detailed runtime/layer markers, and CLAUDE.md still contains contributor-facing high-level architecture guidance.
 ```
 
-- [ ] **Step 2: Inspect documentation-scoped status and diff, while tolerating unrelated local changes elsewhere**
+- [ ] **Step 2: Inspect documentation-scoped status and a combined diff, while tolerating unrelated local changes elsewhere**
 
 Run:
 
 ```bash
 git status --short -- README.md docs/ARCHITECTURE.md
-git diff -- README.md docs/ARCHITECTURE.md
+git diff HEAD -- README.md docs/ARCHITECTURE.md
 ```
 
 Expected:
 
 ```text
-The scoped status shows README.md and docs/ARCHITECTURE.md when they are the files changed by this documentation alignment work, and the scoped diff shows the exact content changes in those two files. Unrelated local changes outside those paths do not block this step.
+The scoped status shows README.md and docs/ARCHITECTURE.md when they are the files changed by this documentation alignment work, and the scoped diff shows the exact staged and unstaged content changes in those two files. Unrelated local changes outside those paths do not block this step.
 ```
 
 - [ ] **Step 3: Run the repository validation gate before finalizing**
