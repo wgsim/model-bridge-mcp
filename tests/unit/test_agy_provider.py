@@ -562,3 +562,29 @@ async def test_ask_agy_cli_propagates_async_empty_output_provider_error():
         response = await ask_agy_cli("hello")
 
     assert "possible quota/rate-limit or empty provider response" in response
+
+
+def test_positional_prompt_providers_set():
+    """_POSITIONAL_PROMPT_PROVIDERS must contain claude_code and agy."""
+    from model_bridge.adapters.subprocess_adapter import _POSITIONAL_PROMPT_PROVIDERS
+    assert "agy" in _POSITIONAL_PROMPT_PROVIDERS
+    assert "claude_code" in _POSITIONAL_PROMPT_PROVIDERS
+    assert "codex" not in _POSITIONAL_PROMPT_PROVIDERS
+    assert "gemini" not in _POSITIONAL_PROMPT_PROVIDERS
+
+
+@pytest.mark.anyio
+async def test_ask_agy_cli_warns_on_model_param():
+    """ask_agy_cli with a model value should log a warning."""
+    from unittest.mock import AsyncMock
+    import model_bridge.main as main_module
+
+    mock_fn = AsyncMock(return_value="ok")
+    with patch("model_bridge.main._get_config", return_value=_build_agy_config()), \
+         patch.object(main_module, "_ask_with_failover", mock_fn), \
+         patch("logging.Logger.warning") as warn_mock:
+        await main_module.ask_agy_cli(prompt="test", model="gpt-4o")
+
+    # Should have warned about ignored model param
+    assert any("model" in str(c.args[0]).lower() and "ignored" in str(c.args[0]).lower()
+               for c in warn_mock.call_args_list)
