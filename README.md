@@ -1,14 +1,18 @@
 # model-bridge-mcp
 
-This project modularizes the monolithic MCP server from `archive/coder_ai_allocator_v1.0.py` / `archive/coder_ai_allocator_v1.1.py` into the `src/model_bridge` structure.
+`model-bridge-mcp` is a modular MCP server that routes model-provider requests across CLI and SDK backends with failover, caching, and security gating. It is the extracted successor to the legacy monolith preserved under `archive/`.
 
 ## Architecture
+A dedicated architecture reference lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Quick map:
 ```text
-main.py (MCP tools)
-  -> config/config_loader.py
-  -> security/sanitizer.py
-  -> core/failover_manager.py
-  -> adapters/subprocess_adapter.py
+src/model_bridge/main.py
+  -> config/            # config loading and runtime defaults
+  -> core/              # routing, failover, caching, response shaping
+  -> adapters/          # subprocess / SDK execution backends
+  -> plugins/           # provider extension surface
+  -> security/          # prompt and file/path safety checks
 ```
 
 ## Environment
@@ -19,13 +23,13 @@ main.py (MCP tools)
 ```bash
 conda create -n model-bridge-mcp_dev python=3.11 -y
 conda activate model-bridge-mcp_dev
-python -m pip install mcp PyYAML pytest
-python -m pip install -e .
+python -m pip install -e ".[dev]" pytest pre-commit
 ```
 
 Notes:
-- `python -m pip install -e .` installs the `model-bridge` console script declared in `pyproject.toml`.
+- `python -m pip install -e ".[dev]"` installs the `model-bridge` console script declared in `pyproject.toml` and the repository's development tooling.
 - `mcp_config.json` uses that console script (`command: "model-bridge"`).
+- If you intentionally want a lighter runtime-only install, `python -m pip install -e .` is sufficient.
 - If you intentionally skip the editable install, source-only execution still works via `PYTHONPATH=src python -m model_bridge.main`.
 
 ## Configuration
