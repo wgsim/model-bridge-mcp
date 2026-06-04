@@ -223,15 +223,18 @@ markers = [
     'deterministic unit coverage separate from broader runtime-shell behavior checks',
     'Env discovery / preflight as execution concerns',
 ]
+missing = [marker for marker in markers if marker not in text]
 for marker in markers:
     print(marker, '->', marker in text)
+if missing:
+    raise SystemExit(f'Missing architecture markers: {missing}')
 PY
 ```
 
 Expected:
 
 ```text
-All headings and key body markers print as True.
+All headings and key body markers print as True, and the command exits 0.
 ```
 
 - [ ] **Step 3: Commit the architecture-reference alignment**
@@ -294,19 +297,19 @@ Expected:
 The README Architecture section stays compact, docs/ARCHITECTURE.md contains the detailed runtime/layer markers, and CLAUDE.md still contains contributor-facing high-level architecture guidance.
 ```
 
-- [ ] **Step 2: Inspect whole-worktree status first, then inspect the two documentation files directly**
+- [ ] **Step 2: Inspect documentation-scoped status and diff, while tolerating unrelated local changes elsewhere**
 
 Run:
 
 ```bash
-git status --short
+git status --short -- README.md docs/ARCHITECTURE.md
 git diff -- README.md docs/ARCHITECTURE.md
 ```
 
 Expected:
 
 ```text
-The whole-worktree status shows only README.md and docs/ARCHITECTURE.md as changed for this documentation alignment work, and the scoped diff shows the exact content changes in those two files.
+The scoped status shows README.md and docs/ARCHITECTURE.md when they are the files changed by this documentation alignment work, and the scoped diff shows the exact content changes in those two files. Unrelated local changes outside those paths do not block this step.
 ```
 
 - [ ] **Step 3: Run the repository validation gate before finalizing**
