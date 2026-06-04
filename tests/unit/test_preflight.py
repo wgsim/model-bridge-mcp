@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from model_bridge.adapters.subprocess_adapter import (
     SubprocessAdapter,
+    _build_provider_env_discovery_command,
     _discover_provider_env_vars,
 )
 
@@ -164,13 +165,94 @@ class TestPreflightCheck:
         assert msg == "ok"
 
 
+def test_build_provider_env_discovery_command_contains_expected_fragments():
+    command = _build_provider_env_discovery_command()
+
+    assert '[ -n "$GOOGLE_API_KEY" ] && echo "GOOGLE_API_KEY=$GOOGLE_API_KEY"' in command
+    assert '[ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY"' in command
+    assert " || " not in command
+    assert command.count("; ") >= 1
+    assert command.endswith("; true")
+
+
 def test_discover_provider_env_vars_collects_multiple_values():
-    with patch.dict(
-        os.environ,
-        {"GOOGLE_API_KEY": "google-token", "OPENAI_API_KEY": "openai-token"},
-        clear=False,
-    ):
+    completed = subprocess.CompletedProcess(
+        args=["bash", "-lc", "env-check"],
+        returncode=0,
+        stdout="GOOGLE_API_KEY=google-token\nOPENAI_API_KEY=openai-token\n",
+        stderr="",
+    )
+
+    with patch("subprocess.run", return_value=completed) as run_mock:
         discovered = _discover_provider_env_vars(timeout=1.0)
 
-    assert discovered["GOOGLE_API_KEY"] == "google-token"
-    assert discovered["OPENAI_API_KEY"] == "openai-token"
+    assert discovered == {
+        "GOOGLE_API_KEY": "google-token",
+        "OPENAI_API_KEY": "openai-token",
+    }
+    run_mock.assert_called_once()
+    run_args, run_kwargs = run_mock.call_args
+    assert run_args[0][1] == "-lc"
+    assert run_args[0][2] == _build_provider_env_discovery_command()
+    assert run_kwargs["capture_output"] is True
+    assert run_kwargs["text"] is True
+    assert run_kwargs["timeout"] == 1.0
+    assert run_kwargs["check"] is False
+
+
+def test_discover_provider_env_vars_ignores_blank_values():
+    completed = subprocess.CompletedProcess(
+        args=["bash", "-lc", "env-check"],
+        returncode=0,
+        stdout="GOOGLE_API_KEY=\nOPENAI_API_KEY=openai-token\n",
+        stderr="",
+    )
+
+    with patch("subprocess.run", return_value=completed):
+        discovered = _discover_provider_env_vars(timeout=1.0)
+
+    assert discovered == {"OPENAI_API_KEY": "openai-token"}
+
+
+def test_discover_provider_env_vars_falls_back_to_next_shell_after_non_zero_result():
+    failed = subprocess.CompletedProcess(
+        args=["bash", "-lc", "env-check"],
+        returncode=1,
+        stdout="",
+        stderr="shell failed",
+    )
+    succeeded = subprocess.CompletedProcess(
+        args=["zsh", "-lc", "env-check"],
+        returncode=0,
+        stdout="OPENAI_API_KEY=openai-token\n",
+        stderr="",
+    )
+
+    with patch("subprocess.run", side_effect=[failed, succeeded]) as run_mock:
+        discovered = _discover_provider_env_vars(timeout=1.0)
+
+    assert discovered == {"OPENAI_API_KEY": "openai-token"}
+    assert run_mock.call_count == 2
+    assert run_mock.call_args_list[0].args[0][0] == "bash"
+    assert run_mock.call_args_list[1].args[0][0] == "zsh"
+
+
+def test_discover_provider_env_vars_falls_back_to_next_shell_after_empty_output():
+    empty = subprocess.CompletedProcess(
+        args=["bash", "-lc", "env-check"],
+        returncode=0,
+        stdout="",
+        stderr="",
+    )
+    succeeded = subprocess.CompletedProcess(
+        args=["zsh", "-lc", "env-check"],
+        returncode=0,
+        stdout="GOOGLE_API_KEY=google-token\n",
+        stderr="",
+    )
+
+    with patch("subprocess.run", side_effect=[empty, succeeded]) as run_mock:
+        discovered = _discover_provider_env_vars(timeout=1.0)
+
+    assert discovered == {"GOOGLE_API_KEY": "google-token"}
+    assert run_mock.call_count == 2
