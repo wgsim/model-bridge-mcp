@@ -71,15 +71,15 @@ git commit -m "docs: keep README architecture overview concise"
 
 ---
 
-### Task 2: Update the architecture reference to match the current implementation
+### Task 2: Create the architecture reference from committed state and align it to the current implementation
 
 **Files:**
-- Modify: `docs/ARCHITECTURE.md`
+- Create: `docs/ARCHITECTURE.md`
 - Verify: `docs/ARCHITECTURE.md`
 
-- [ ] **Step 1: Keep the top-level structure section aligned to the checked-in architecture directories**
+- [ ] **Step 1: Create `docs/ARCHITECTURE.md` with the approved top-level structure section**
 
-Ensure the `## Top-level structure` block in `docs/ARCHITECTURE.md` includes this exact structure:
+Create `docs/ARCHITECTURE.md` and ensure its `## Top-level structure` block includes this exact structure:
 
 ```md
 ## Top-level structure
@@ -104,9 +104,9 @@ model-bridge-mcp/
 ```
 ```
 
-- [ ] **Step 2: Refine the execution backend section to include env discovery / preflight responsibilities**
+- [ ] **Step 2: Add the execution backend section with env discovery / preflight responsibilities**
 
-Replace the bullets under `### 4. Execution backend layer` with this exact content:
+Add the following content under `### 4. Execution backend layer`:
 
 ```md
 ### 4. Execution backend layer
@@ -119,9 +119,9 @@ Replace the bullets under `### 4. Execution backend layer` with this exact conte
 - Keeps provider execution details out of the tool registration layer.
 ```
 
-- [ ] **Step 3: Refine the verification layer so unit and integration responsibilities stay at the right altitude**
+- [ ] **Step 3: Add the verification layer so unit and integration responsibilities stay at the right altitude**
 
-Replace the bullets under `### 7. Verification layer` with this exact content:
+Add the following content under `### 7. Verification layer`:
 
 ```md
 ### 7. Verification layer
@@ -133,9 +133,9 @@ Replace the bullets under `### 7. Verification layer` with this exact content:
 - Changes around env discovery / preflight should keep deterministic unit coverage separate from broader runtime-shell behavior checks.
 ```
 
-- [ ] **Step 4: Refine the architectural boundaries section to place env discovery at the adapter/runtime boundary**
+- [ ] **Step 4: Add the architectural boundaries section to place env discovery at the adapter/runtime boundary**
 
-Replace the existing boundary bullets with this exact section:
+Add the following boundary section:
 
 ```md
 ## Key architectural boundaries
@@ -164,32 +164,41 @@ git commit -m "docs: align architecture reference with current layers"
 - Modify: `docs/ARCHITECTURE.md` if wording drift remains
 - Verify: `README.md`, `docs/ARCHITECTURE.md`, `CLAUDE.md`
 
-- [ ] **Step 1: Compare the two docs and remove any duplicated deep-architecture wording from README**
+- [ ] **Step 1: Compare the two docs using a section-scoped check for README’s `## Architecture` block**
 
 Run:
 
 ```bash
-rg -n "Architecture|runtime|adapters|plugins|security|env discovery|preflight" README.md docs/ARCHITECTURE.md CLAUDE.md
+python - <<'PY'
+from pathlib import Path
+text = Path('README.md').read_text().splitlines()
+in_section = False
+for line in text:
+    if line.startswith('## '):
+        in_section = line == '## Architecture'
+    if in_section:
+        print(line)
+PY
 ```
 
 Expected:
 
 ```text
-README.md contains only the compact quick map and link, while docs/ARCHITECTURE.md contains the detailed structural explanations.
+The README Architecture block contains only the short link sentence and the compact quick map, while deeper structural detail lives in docs/ARCHITECTURE.md.
 ```
 
-- [ ] **Step 2: Inspect the final diff for doc-only scope**
+- [ ] **Step 2: Inspect the whole working tree for doc-only scope**
 
 Run:
 
 ```bash
-git diff -- README.md docs/ARCHITECTURE.md
+git status --short
 ```
 
 Expected:
 
 ```text
-Only README.md and docs/ARCHITECTURE.md are changed for this documentation alignment work.
+Only README.md and docs/ARCHITECTURE.md appear as working-tree changes for this documentation alignment work.
 ```
 
 - [ ] **Step 3: Run the repository validation gate before finalizing**
