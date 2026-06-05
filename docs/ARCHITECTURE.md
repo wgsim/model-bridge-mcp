@@ -58,7 +58,8 @@ model-bridge-mcp/
 - `src/model_bridge/core/task_tracker.py`
 - `src/model_bridge/core/response.py`
 - `src/model_bridge/core/streaming.py`
-- Owns request routing, provider capability checks, plugin discovery, failover, active cache/backend coordination, prompt/session caching, batch execution, response shaping, and streaming/task lifecycle support.
+- Owns request routing, provider capability checks, plugin discovery, failover, prompt/session caching, batch execution, response shaping, and streaming/task lifecycle support.
+- `src/model_bridge/core/cache/` contains backend-oriented cache implementations and factories that are available for broader integration, while the active public request path still uses the prompt-cache wiring described in `main.py` / `prompt_cache.py`.
 
 ### 4. Execution backend layer
 
