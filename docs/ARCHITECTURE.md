@@ -51,13 +51,14 @@ model-bridge-mcp/
 - `src/model_bridge/core/plugin_loader.py`
 - `src/model_bridge/core/failover_manager.py`
 - `src/model_bridge/core/batch_executor.py`
-- `src/model_bridge/core/prompt_cache.py`
+- `src/model_bridge/core/cache/`
+- `src/model_bridge/core/prompt_cache.py` (compatibility-focused shim around prompt caching behavior)
 - `src/model_bridge/core/session_memory.py`
 - `src/model_bridge/core/rate_limiter.py`
 - `src/model_bridge/core/task_tracker.py`
 - `src/model_bridge/core/response.py`
 - `src/model_bridge/core/streaming.py`
-- Owns request routing, provider capability checks, plugin discovery, failover, prompt/session caching, batch execution, response shaping, and streaming/task lifecycle support.
+- Owns request routing, provider capability checks, plugin discovery, failover, active cache/backend coordination, prompt/session caching, batch execution, response shaping, and streaming/task lifecycle support.
 
 ### 4. Execution backend layer
 
@@ -65,8 +66,9 @@ model-bridge-mcp/
 - `src/model_bridge/adapters/subprocess_adapter.py`
 - `src/model_bridge/adapters/sdk_adapter.py`
 - Selects the transport implementation from `runtime.transport_mode`.
-- Owns provider execution details such as subprocess invocation, SDK invocation, CLI/path discovery, and provider environment-variable discovery / preflight behavior.
-- Keeps provider execution details out of the tool registration layer.
+- Owns most provider execution details such as subprocess invocation, SDK invocation, CLI/path discovery, and provider environment-variable discovery behavior.
+- Some CLI health/probing logic still lives in `main.py` health tooling, so preflight responsibility is currently split between the adapter layer and the public runtime health surface.
+- Keeps provider execution details out of the tool registration layer as much as the current implementation allows.
 
 ### 5. Security layer
 

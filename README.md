@@ -27,7 +27,7 @@ python -m pip install -e ".[dev]" pytest pre-commit
 ```
 
 Notes:
-- `python -m pip install -e ".[dev]"` installs the `model-bridge` console script declared in `pyproject.toml` and the repository's development tooling.
+- The full command above installs the `model-bridge` console script declared in `pyproject.toml`, plus `pytest` and `pre-commit` as explicit development tools.
 - `mcp_config.json` uses that console script (`command: "model-bridge"`).
 - If you intentionally want a lighter runtime-only install, `python -m pip install -e .` is sufficient.
 - If you intentionally skip the editable install, source-only execution still works via `PYTHONPATH=src python -m model_bridge.main`.
