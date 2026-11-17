@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-DEFAULT_CODEX_MODEL = "gpt-5.4"
+DEFAULT_CODEX_MODEL = "gpt-6.1-sol"
 
 ALLOWED_REASONING_EFFORT_VALUES: tuple[str, ...] = (
     "none",
@@ -13,10 +13,18 @@ ALLOWED_REASONING_EFFORT_VALUES: tuple[str, ...] = (
     "medium",
     "high",
     "xhigh",
+    "max",
+    "ultra",
 )
 
 # Empty tuple means this MCP does not enable reasoning_effort for that model.
 DOCUMENTED_REASONING_EFFORTS_BY_MODEL: dict[str, tuple[str, ...]] = {
+    # GPT-6 levels verified against the model catalog in Codex CLI 0.167.0-alpha.4.
+    "gpt-6-astra": ("low", "medium", "high", "xhigh", "max", "ultra"),
+    "gpt-6.1-sol": ("low", "medium", "high", "xhigh", "max", "ultra"),
+    "gpt-6.1-terra": ("low", "medium", "high", "xhigh", "max", "ultra"),
+    "gpt-6-luna": ("low", "medium", "high", "xhigh", "max"),
+    # Keep explicitly requested legacy IDs valid for existing callers.
     "gpt-5.4": ("none", "low", "medium", "high", "xhigh"),
     "gpt-5.3-codex": ("low", "medium", "high", "xhigh"),
     "gpt-5.2-codex": ("low", "medium", "high", "xhigh"),

@@ -211,6 +211,69 @@ def test_ask_chatgpt_cli_rejects_reasoning_effort_for_unsupported_codex_model():
         )
 
 
+@pytest.mark.parametrize(
+    ("model", "effort"),
+    [
+        ("gpt-6-astra", "max"),
+        ("gpt-6-astra", "ultra"),
+        ("gpt-6.1-sol", "max"),
+        ("gpt-6.1-sol", "ultra"),
+        ("gpt-6.1-terra", "xhigh"),
+        ("gpt-6.1-terra", "max"),
+        ("gpt-6.1-terra", "ultra"),
+        ("gpt-6-luna", "xhigh"),
+    ],
+)
+def test_ask_chatgpt_cli_forwards_new_codex_efforts(monkeypatch, model, effort):
+    fake_failover = _CaptureProviderArgsFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+
+    out = asyncio.run(
+        main_module.ask_chatgpt_cli("hi", model=model, reasoning_effort=effort)
+    )
+
+    assert out == "ok"
+    assert fake_failover.last["provider_args"] == {
+        "codex": ["--model", model, "--reasoning-effort", effort]
+    }
+
+
+@pytest.mark.parametrize(
+    ("model", "effort"),
+    [
+        ("gpt-6-luna", "ultra"),
+        ("gpt-5.4", "max"),
+        ("gpt-5.4", "ultra"),
+    ],
+)
+def test_ask_chatgpt_cli_keeps_model_specific_effort_limits(monkeypatch, model, effort):
+    def forbidden_failover():
+        raise AssertionError("unsupported efforts must be rejected before execution")
+
+    monkeypatch.setattr(main_module, "_get_failover", forbidden_failover)
+
+    with pytest.raises(ValueError, match="does not support reasoning_effort"):
+        asyncio.run(
+            main_module.ask_chatgpt_cli("hi", model=model, reasoning_effort=effort)
+        )
+
+
+def test_ask_chatgpt_cli_filters_ultra_trials_to_supported_models(monkeypatch):
+    from model_bridge.config.config_loader import _load_default_yaml
+
+    fake_failover = _TrialSequenceFailover()
+    monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)
+    monkeypatch.setattr(main_module, "_get_config", _load_default_yaml)
+
+    out = asyncio.run(main_module.ask_chatgpt_cli("hi", reasoning_effort="ultra"))
+
+    assert out.startswith("[Task Execution Failed]")
+    assert fake_failover.calls == [
+        {"codex": ["--model", model, "--reasoning-effort", "ultra"]}
+        for model in ("gpt-6.1-sol", "gpt-6-astra", "gpt-6.1-terra")
+    ]
+
+
 def test_ask_chatgpt_cli_filters_codex_catalog_by_reasoning_effort(monkeypatch):
     fake_failover = _TrialSequenceFailover()
     monkeypatch.setattr(main_module, "_get_failover", lambda: fake_failover)

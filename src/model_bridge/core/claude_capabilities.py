@@ -1,4 +1,4 @@
-"""Claude 4.6 effort support metadata and validation helpers."""
+"""Claude model effort support metadata and validation helpers."""
 
 from __future__ import annotations
 
@@ -16,6 +16,12 @@ DOCUMENTED_CLAUDE_EFFORTS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "haiku": (),
     "sonnet": ("low", "medium", "high"),
     "opus": ("low", "medium", "high", "max"),
+    "fable": ("low", "medium", "high", "max"),
+    "claude-haiku-5-5": (),
+    "claude-sonnet-5-5": ("low", "medium", "high"),
+    "claude-opus-5-5": ("low", "medium", "high", "max"),
+    "claude-fable-5-2": ("low", "medium", "high", "max"),
+    # Keep explicitly requested legacy IDs valid for existing callers.
     "claude-sonnet-4-6": ("low", "medium", "high"),
     "claude-opus-4-6": ("low", "medium", "high", "max"),
 }
@@ -23,6 +29,10 @@ DOCUMENTED_CLAUDE_EFFORTS_BY_MODEL: dict[str, tuple[str, ...]] = {
 ADAPTIVE_THINKING_MODELS: set[str] = {
     "sonnet",
     "opus",
+    "fable",
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-fable-5-2",
     "claude-sonnet-4-6",
     "claude-opus-4-6",
 }

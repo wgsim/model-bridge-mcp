@@ -187,6 +187,7 @@ class AgyPlugin(ProviderPlugin):
         return await ask_agy_cli(
             prompt=prompt,
             model=model,
+            reasoning_effort=kwargs.get("reasoning_effort"),
             timeout_seconds=options.get("timeout_seconds"),
             max_output_tokens=options.get("max_output_tokens"),
             response_format=options.get("response_format"),

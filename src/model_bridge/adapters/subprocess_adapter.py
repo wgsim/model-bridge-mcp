@@ -657,6 +657,10 @@ class SubprocessAdapter(CLIAdapter):
             ok, err, rewritten_args = self._rewrite_claude_args(rewritten_args)
             if not ok:
                 return False, err, [], "", None
+        elif service_name == "agy":
+            ok, err, rewritten_args = self._rewrite_agy_args(rewritten_args)
+            if not ok:
+                return False, err, [], "", None
         full_cmd = cmd_base + rewritten_args
         stdin_input = full_input
         agy_log_path: str | None = None
@@ -748,6 +752,19 @@ class SubprocessAdapter(CLIAdapter):
             rewritten.extend(["--effort", effort])
             idx += 2
         return True, "", rewritten
+
+    @staticmethod
+    def _rewrite_agy_args(args: Sequence[str]) -> tuple[bool, str, list[str]]:
+        args_list = list(args)
+        if "--reasoning-effort" not in args_list:
+            return True, "", args_list
+        idx = args_list.index("--reasoning-effort")
+        if idx + 1 >= len(args_list):
+            return False, "Configuration Error: Missing value for --reasoning-effort", []
+        effort = args_list[idx + 1]
+        if not effort:
+            return False, "Configuration Error: Missing value for --reasoning-effort", []
+        return True, "", args_list[:idx] + ["--effort", effort] + args_list[idx + 2 :]
 
     @staticmethod
     def _provider_timeout_hint(service_name: str, details: str) -> str:

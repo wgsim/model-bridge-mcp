@@ -29,6 +29,11 @@ from model_bridge.core.claude_capabilities import (
     normalize_claude_reasoning_effort,
     validate_claude_reasoning_effort,
 )
+from model_bridge.core.agy_capabilities import (
+    filter_agy_models_for_reasoning_effort,
+    normalize_agy_reasoning_effort,
+    validate_agy_reasoning_effort,
+)
 from model_bridge.core.codex_capabilities import (
     filter_codex_models_for_reasoning_effort,
     normalize_codex_reasoning_effort,
@@ -331,7 +336,7 @@ async def _dispatch_ask_provider(
             model=model,
             **common_kwargs,
         )
-    if provider_id in {"codex", "claude_code", "gemini"}:
+    if provider_id in {"codex", "claude_code", "gemini", "agy"}:
         return await handler(
             prompt,
             model=model,
@@ -595,6 +600,8 @@ def _normalize_provider_reasoning_effort(
         return normalize_claude_reasoning_effort(reasoning_effort)
     if provider == "gemini":
         return normalize_gemini_reasoning_effort(reasoning_effort)
+    if provider == "agy":
+        return normalize_agy_reasoning_effort(reasoning_effort)
     token = (reasoning_effort or "").strip()
     if token:
         raise ValueError(f"reasoning_effort is not supported for provider='{provider}'")
@@ -612,6 +619,8 @@ def _validate_provider_reasoning_effort(
         return validate_claude_reasoning_effort(model_name, reasoning_effort)
     if provider == "gemini":
         return validate_gemini_reasoning_effort(model_name, reasoning_effort)
+    if provider == "agy":
+        return validate_agy_reasoning_effort(model_name, reasoning_effort)
     return _normalize_provider_reasoning_effort(provider, reasoning_effort)
 
 
@@ -627,6 +636,8 @@ def _filter_provider_models_for_reasoning_effort(
         return filter_codex_models_for_reasoning_effort(model_names, normalized)
     if provider == "claude_code":
         return filter_claude_models_for_reasoning_effort(model_names, normalized)
+    if provider == "agy":
+        return filter_agy_models_for_reasoning_effort(model_names, normalized)
     raise ValueError(f"reasoning_effort is not supported for provider='{provider}'")
 
 
@@ -659,9 +670,9 @@ def _build_provider_args(
     reasoning_effort: str | None,
 ) -> list[str]:
     args: list[str] = []
-    if model and provider in {"codex", "gemini", "claude_code"}:
+    if model and provider in {"codex", "gemini", "claude_code", "agy"}:
         args.extend(["--model", model])
-    if provider in {"codex", "claude_code", "gemini"}:
+    if provider in {"codex", "claude_code", "gemini", "agy"}:
         normalized_effort = _normalize_provider_reasoning_effort(provider, reasoning_effort)
         if normalized_effort:
             args.extend(["--reasoning-effort", normalized_effort])
@@ -697,7 +708,7 @@ def _build_provider_model_trials(
     trials: list[str | None] = []
     normalized_effort = _normalize_provider_reasoning_effort(provider, reasoning_effort)
     if explicit:
-        if provider in {"codex", "claude_code", "gemini"}:
+        if provider in {"codex", "claude_code", "gemini", "agy"}:
             _validate_provider_reasoning_effort(provider, explicit, normalized_effort)
             if provider in {"claude_code", "gemini"} and normalized_effort is not None:
                 probe_status, probe_message = _probe_provider_reasoning_effort(
@@ -714,7 +725,7 @@ def _build_provider_model_trials(
     else:
         catalog_key = f"{provider}_model_catalog"
         catalog = _get_config().get("models", {}).get(catalog_key, [])
-        if provider in {"codex", "claude_code"} and normalized_effort is not None:
+        if provider in {"codex", "claude_code", "agy"} and normalized_effort is not None:
             compatible = _filter_provider_models_for_reasoning_effort(
                 provider,
                 catalog,
@@ -772,7 +783,10 @@ def _build_provider_model_trials(
         else:
             for item in catalog:
                 token = (item or "").strip()
-                if token and token not in trials:
+                if token in {"default", "auto"} and provider != "ollama":
+                    if None not in trials:
+                        trials.append(None)
+                elif token and token not in trials:
                     trials.append(token)
     if normalized_effort is None and None not in trials:
         trials.append(None)
@@ -784,10 +798,6 @@ def _build_provider_model_trials(
 
 
 def _list_static_provider_models(provider_id: str) -> dict:
-    # Note: For the 'agy' provider, the model catalog is defined as ["default"].
-    # This is a virtual placeholder to satisfy model list schema requirements in MCP clients,
-    # as the underlying Go-based agy CLI executes in a model-less autonomous agentic mode
-    # and does not support or parse any model name parameters or --model flag arguments.
     models_cfg = _get_config()["models"]
     commands_cfg = _get_config()["commands"]
     catalog_key = f"{provider_id}_model_catalog"
@@ -796,7 +806,7 @@ def _list_static_provider_models(provider_id: str) -> dict:
     return {
         "configured": _is_provider_configured(provider_id),
         "source": "config",
-        "model_flag": None if provider_id == "agy" else "--model",
+        "model_flag": "--model",
         "catalog": catalog,
         "catalog_count": len(catalog),
         "default_model": default_model,
@@ -824,7 +834,7 @@ async def _ask_with_failover(
     stream: bool | None,
     output_mode: str,
 ) -> str:
-    """Shared implementation for ask_chatgpt_cli, ask_gemini_cli, and ask_claude_code."""
+    """Shared implementation for the CLI provider ask tools."""
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
@@ -837,13 +847,6 @@ async def _ask_with_failover(
         if json_error:
             return _finalize_response(
                 json_error,
-                "agy",
-                options,
-            )
-        # Codex review recommendation: model override rejection
-        if model is not None and model.strip().lower() not in {"default", "auto", ""}:
-            return _finalize_response(
-                "[PROVIDER ERROR] 'agy' does not support model overrides",
                 "agy",
                 options,
             )
@@ -1168,6 +1171,7 @@ async def ask_agy_cli(
     save_path: str = None,
     force_model: bool = False,
     model: str | None = None,
+    reasoning_effort: str | None = None,
     timeout_seconds: float | None = None,
     max_output_tokens: int | None = None,
     response_format: str | None = None,
@@ -1181,7 +1185,8 @@ async def ask_agy_cli(
         prompt: The text prompt to send.
         save_path: Relative path such as 'reports/result.txt'; it is saved under .model_bridge/outputs/... and must not include the '.model_bridge/outputs/' prefix. Absolute paths and traversal escapes are rejected. If you previously passed an absolute path, migrate to a path relative to .model_bridge/outputs.
         force_model: If True, skip failover and only use agy CLI.
-        model: Model override (None, 'default', or 'auto' only for agy).
+        model: Model override (None, 'default', or 'auto' uses the agy default).
+        reasoning_effort: Antigravity effort override translated to `--effort`.
         timeout_seconds: Timeout in seconds. Default 300s.
         max_output_tokens: Limit response tokens.
         response_format: 'json' for JSON output, None for plain text.
@@ -1202,12 +1207,6 @@ async def ask_agy_cli(
             "agy",
             options,
         )
-    # agy has no --model flag; warn if model is provided
-    if model is not None:
-        logger.warning(
-            "agy provider does not support model selection; "
-            "model=%r parameter ignored", model,
-        )
     return await _ask_with_failover(
         prompt,
         default_primary="agy",
@@ -1218,7 +1217,7 @@ async def ask_agy_cli(
         save_path=save_path,
         force_model=force_model,
         model=model,
-        reasoning_effort=None,
+        reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
         max_output_tokens=max_output_tokens,
         response_format=response_format,
@@ -1250,7 +1249,7 @@ async def ask(
 
     Args:
         prompt: The text prompt to send.
-        provider: 'auto' (default, routes to codex), 'codex', 'gemini', 'ollama', 'claude_code'.
+        provider: 'auto' (default, routes to codex), 'codex', 'gemini', 'ollama', 'claude_code', 'agy'.
         model: Model name or 'default'/'auto'. Provider-specific (e.g. 'gpt-4o', 'gemini-2.5-pro').
         reasoning_effort: Provider-specific reasoning effort override for supported providers.
         save_path: Relative path such as 'reports/result.txt'; it is saved under .model_bridge/outputs/... and must not include the '.model_bridge/outputs/' prefix. Absolute paths and traversal escapes are rejected. If you previously passed an absolute path, migrate to a path relative to .model_bridge/outputs.
@@ -1357,7 +1356,7 @@ async def ask_batch(
 
     Args:
         prompts: List of text prompts to send.
-        provider: 'auto' (default), 'codex', 'gemini', 'ollama', 'claude_code'.
+        provider: 'auto' (default), 'codex', 'gemini', 'ollama', 'claude_code', 'agy'.
         model: Model name or 'default'/'auto'.
         reasoning_effort: Provider-specific reasoning effort override for supported providers.
         mode: 'sequential' (default) or 'parallel'.
