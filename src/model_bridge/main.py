@@ -834,7 +834,7 @@ async def _ask_with_failover(
     stream: bool | None,
     output_mode: str,
 ) -> str:
-    """Shared implementation for ask_chatgpt_cli, ask_gemini_cli, and ask_claude_code."""
+    """Shared implementation for the CLI provider ask tools."""
     options = _normalize_ask_options(
         timeout_seconds, max_output_tokens, response_format, verbosity, stream
     )
@@ -1249,7 +1249,7 @@ async def ask(
 
     Args:
         prompt: The text prompt to send.
-        provider: 'auto' (default, routes to codex), 'codex', 'gemini', 'ollama', 'claude_code'.
+        provider: 'auto' (default, routes to codex), 'codex', 'gemini', 'ollama', 'claude_code', 'agy'.
         model: Model name or 'default'/'auto'. Provider-specific (e.g. 'gpt-4o', 'gemini-2.5-pro').
         reasoning_effort: Provider-specific reasoning effort override for supported providers.
         save_path: Relative path such as 'reports/result.txt'; it is saved under .model_bridge/outputs/... and must not include the '.model_bridge/outputs/' prefix. Absolute paths and traversal escapes are rejected. If you previously passed an absolute path, migrate to a path relative to .model_bridge/outputs.
@@ -1356,7 +1356,7 @@ async def ask_batch(
 
     Args:
         prompts: List of text prompts to send.
-        provider: 'auto' (default), 'codex', 'gemini', 'ollama', 'claude_code'.
+        provider: 'auto' (default), 'codex', 'gemini', 'ollama', 'claude_code', 'agy'.
         model: Model name or 'default'/'auto'.
         reasoning_effort: Provider-specific reasoning effort override for supported providers.
         mode: 'sequential' (default) or 'parallel'.
