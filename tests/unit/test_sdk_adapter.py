@@ -166,7 +166,11 @@ def test_run_async_codex_defaults_to_gpt_5_4_from_catalog(monkeypatch):
     assert captured["payload"]["model"] == "gpt-5.4"
 
 
-def test_run_async_codex_adds_reasoning_effort_to_payload(monkeypatch):
+@pytest.mark.parametrize(
+    ("model", "effort"),
+    [("gpt-5.4", "high"), ("gpt-6.1-sol", "ultra")],
+)
+def test_run_async_codex_adds_reasoning_effort_to_payload(monkeypatch, model, effort):
     captured = {}
     adapter = SDKAdapter(
         models_config=_models_config(),
@@ -180,12 +184,13 @@ def test_run_async_codex_adds_reasoning_effort_to_payload(monkeypatch):
     monkeypatch.setattr(adapter, "_post_json", _fake_post)
 
     ok, output = asyncio.run(
-        adapter.run_async("codex", ["--model", "gpt-5.4", "--reasoning-effort", "high"], "hello")
+        adapter.run_async("codex", ["--model", model, "--reasoning-effort", effort], "hello")
     )
 
     assert ok is True
     assert output == "ok"
-    assert captured["payload"]["reasoning"] == {"effort": "high"}
+    assert captured["payload"]["model"] == model
+    assert captured["payload"]["reasoning"] == {"effort": effort}
 
 
 def test_run_async_codex_falls_back_to_current_default_when_catalog_is_empty(monkeypatch):

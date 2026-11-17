@@ -548,13 +548,17 @@ def test_run_rejects_reasoning_effort_for_gemini_subprocess():
     assert "sdk-only" in output
 
 
-def test_run_rewrites_codex_reasoning_effort_to_config_override():
+@pytest.mark.parametrize(
+    ("model", "effort"),
+    [("gpt-5.4", "high"), ("gpt-6.1-sol", "ultra")],
+)
+def test_run_rewrites_codex_reasoning_effort_to_config_override(model, effort):
     adapter = SubprocessAdapter(
         {"codex": {"exec": ["codex", "exec", "--skip-git-repo-check"], "health": ["codex", "--version"]}},
         system_suffix=" [suffix]",
     )
     completed = subprocess.CompletedProcess(
-        args=["codex", "exec", "--skip-git-repo-check", "--model", "gpt-5.4"],
+        args=["codex", "exec", "--skip-git-repo-check", "--model", model],
         returncode=0,
         stdout="ok\n",
         stderr="",
@@ -564,7 +568,7 @@ def test_run_rewrites_codex_reasoning_effort_to_config_override():
     ) as run_mock:
         ok, output = adapter.run(
             "codex",
-            ["--model", "gpt-5.4", "--reasoning-effort", "high"],
+            ["--model", model, "--reasoning-effort", effort],
             "hello",
         )
 
@@ -575,9 +579,9 @@ def test_run_rewrites_codex_reasoning_effort_to_config_override():
         "exec",
         "--skip-git-repo-check",
         "--model",
-        "gpt-5.4",
+        model,
         "-c",
-        'model_reasoning_effort="high"',
+        f'model_reasoning_effort="{effort}"',
     ]
     assert run_mock.call_args.kwargs["input"] == "hello [suffix]"
 

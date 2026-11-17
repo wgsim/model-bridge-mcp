@@ -382,9 +382,8 @@ Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code|agy")` t
   - `gemini-3-flash-preview`: `minimal`, `low`, `medium`, `high`
   - `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`: disabled in this MCP
 - Codex `reasoning_effort` guardrails are model-specific:
-  - `gpt-6-astra`, `gpt-6.1-sol`: `low`, `medium`, `high`, `xhigh`
-  - `gpt-6.1-terra`: `low`, `medium`, `high`
-  - `gpt-6-luna`: `low`, `medium`, `high`, `max`
+  - `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`: `low`, `medium`, `high`, `xhigh`, `max`, `ultra`
+  - `gpt-6-luna`: `low`, `medium`, `high`, `xhigh`, `max`
 - Claude 5.5/Fable `reasoning_effort` guardrails are model-specific:
   - `sonnet` / `claude-sonnet-5-5`: `low`, `medium`, `high`
   - `opus` / `claude-opus-5-5`: `low`, `medium`, `high`, `max`
