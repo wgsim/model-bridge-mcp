@@ -64,12 +64,10 @@ models:
     - "default"
     - "coder"
   codex_model_catalog:
-    - "gpt-5.4"
-    - "gpt-5.3-codex"
-    - "gpt-5.2-codex"
-    - "gpt-5.1-codex-max"
-    - "gpt-5.2"
-    - "gpt-5.1-codex-mini"
+    - "gpt-6.1-sol"
+    - "gpt-6-astra"
+    - "gpt-6.1-terra"
+    - "gpt-6-luna"
   gemini_model_catalog:
     - "gemini-3.1-pro-preview"
     - "gemini-3-flash-preview"
@@ -81,10 +79,31 @@ models:
     - "haiku"
     - "sonnet"
     - "opus"
-  # Note: For the agy CLI, 'default' is a virtual placeholder to satisfy MCP schema requirements,
-  # as the agy CLI executes in a model-less autonomous agentic mode and does not support model overrides.
+    - "fable"
+    - "claude-fable-5-2"
+    - "claude-opus-5-5"
+    - "claude-sonnet-5-5"
+    - "claude-haiku-5-5"
   agy_model_catalog:
     - "default"
+    - "gemini-4-argon-low"
+    - "gemini-4-argon-medium"
+    - "gemini-4-argon-high"
+    - "gemini-4-hydrogen-low"
+    - "gemini-4-hydrogen-medium"
+    - "gemini-4-hydrogen-high"
+    - "gemini-4-hydrogen-xhigh"
+    - "gemini-pro-orchestrator-g1-pro"
+    - "gemini-3.8-flash-low"
+    - "gemini-3.8-flash-medium"
+    - "gemini-3.8-flash-high"
+    - "claude-opus-5-5-low"
+    - "claude-opus-5-5-medium"
+    - "claude-opus-5-5-high"
+    - "claude-sonnet-5-5-low"
+    - "claude-sonnet-5-5-medium"
+    - "claude-sonnet-5-5-high"
+    - "gpt-oss-120b-medium"
 
 security:
   block_patterns:

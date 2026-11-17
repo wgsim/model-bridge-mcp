@@ -582,6 +582,42 @@ def test_run_rewrites_codex_reasoning_effort_to_config_override():
     assert run_mock.call_args.kwargs["input"] == "hello [suffix]"
 
 
+def test_run_rewrites_agy_reasoning_effort_to_effort_flag():
+    adapter = SubprocessAdapter(
+        {"agy": {"exec": ["agy", "-p"], "health": ["agy", "--version"]}},
+    )
+    completed = subprocess.CompletedProcess(
+        args=["agy", "--model", "gemini-4-hydrogen-high", "--effort", "high", "-p", "hello"],
+        returncode=0,
+        stdout="ok\n",
+        stderr="",
+    )
+    with patch("shutil.which", return_value="/usr/bin/agy"), patch(
+        "subprocess.run", return_value=completed
+    ) as run_mock, patch.object(
+        SubprocessAdapter, "_create_temp_log_file", return_value="/tmp/agy.log"
+    ):
+        ok, output = adapter.run(
+            "agy",
+            ["--model", "gemini-4-hydrogen-high", "--reasoning-effort", "high"],
+            "hello",
+        )
+
+    assert ok is True
+    assert output == "ok"
+    assert run_mock.call_args.args[0] == [
+        "agy",
+        "--model",
+        "gemini-4-hydrogen-high",
+        "--effort",
+        "high",
+        "--log-file",
+        "/tmp/agy.log",
+        "-p",
+        "hello",
+    ]
+
+
 def test_run_passes_prompt_as_argument_for_claude_p_mode():
     adapter = SubprocessAdapter(
         {"claude_code": {"exec": ["claude", "-p"], "health": ["claude", "--version"]}},

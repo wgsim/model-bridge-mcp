@@ -214,9 +214,9 @@ Behavior:
 
 ## Unified Ask API
 You can use the new unified tool:
-- `ask(prompt, provider="auto|codex|gemini|ollama|claude_code", model="default|auto|...", reasoning_effort=None)`
-- For `codex`/`gemini`/`claude_code`, set `model="<provider-model-id>"` to forward model selection to each CLI.
-- For `codex`/`gemini`/`claude_code`, model trial policy is:
+- `ask(prompt, provider="auto|codex|gemini|ollama|claude_code|agy", model="default|auto|...", reasoning_effort=None)`
+- For `codex`/`gemini`/`claude_code`/`agy`, set `model="<provider-model-id>"` to forward model selection to each CLI.
+- For `codex`/`gemini`/`claude_code`/`agy`, model trial policy is:
   - explicit `model` => try that model first, then retry once without `--model`
   - no explicit `model` => try provider catalog models in order, then retry once without `--model`
 - `reasoning_effort` is currently supported for:
@@ -228,8 +228,9 @@ You can use the new unified tool:
   - `codex` subprocess => `codex exec -c model_reasoning_effort="..."`
   - `gemini` sdk => `generationConfig.thinkingConfig.thinkingLevel`
   - `gemini` subprocess => unsupported in this MCP
-  - `claude_code` sdk => `output_config.effort` plus `thinking={"type":"adaptive"}` for Claude 4.6 aliases
+  - `claude_code` sdk => `output_config.effort` plus adaptive thinking for supported Claude aliases
   - `claude_code` subprocess => `claude --effort <level>`
+  - `agy` subprocess => `agy --effort <level>`
 - Claude effort handling also uses a transport-specific runtime probe:
   - confirmed unsupported on the current machine/account => hard fail
   - probe timeout or inconclusive transport/auth error => pass through to the normal request path
@@ -360,32 +361,36 @@ Interpretation guide:
 - `pull_commands`: ready-to-run install commands for missing models.
 
 ## Provider Model Inventory Tool
-Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code")` to inspect model options per provider.
+Use `list_provider_models(provider="all|codex|gemini|ollama|claude_code|agy")` to inspect model options per provider.
 
 - `ollama`: dynamic runtime inventory (`installed`, `missing`, `pull_commands`).
-- `codex/gemini/claude_code`: config-based catalog from:
+- `codex/gemini/claude_code/agy`: config-based catalog from:
   - `models.codex_model_catalog`
   - `models.gemini_model_catalog`
   - `models.claude_code_model_catalog`
+  - `models.agy_model_catalog`
 - Each non-ollama provider includes `model_flag="--model"`, `default_model`, and configured command metadata.
 - Current default catalogs:
-  - `codex`: `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5.2`, `gpt-5.1-codex-mini`
+  - `codex`: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6.1-terra`, `gpt-6-luna`
   - `gemini`: `gemini-3.1-pro-preview`, `gemini-3-flash-preview`, `gemini-2.5-pro`, `gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-3-pro-preview`
-  - `claude_code`: `haiku`, `sonnet`, `opus`
-- Codex `default_model` is the first catalog entry, currently `gpt-5.4`.
+  - `claude_code`: `haiku`, `sonnet`, `opus`, `fable`, `claude-fable-5-2`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`
+  - `agy`: `default`, plus the model/effort variants exposed by `agy models`
+- Codex `default_model` is the first catalog entry, currently `gpt-6.1-sol`.
 - Gemini `default_model` is the first catalog entry, currently `gemini-3.1-pro-preview`.
 - Gemini `reasoning_effort` guardrails are model-specific:
   - `gemini-3.1-pro-preview`, `gemini-3-pro-preview`: `low`, `high`
   - `gemini-3-flash-preview`: `minimal`, `low`, `medium`, `high`
   - `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`: disabled in this MCP
 - Codex `reasoning_effort` guardrails are model-specific:
-  - `gpt-5.4`: `none`, `low`, `medium`, `high`, `xhigh`
-  - `gpt-5.3-codex`, `gpt-5.2-codex`: `low`, `medium`, `high`, `xhigh`
-  - `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`: disabled in this MCP until documented support is confirmed
-- Claude 4.6 `reasoning_effort` guardrails are model-specific:
-  - `sonnet` / `claude-sonnet-4-6`: `low`, `medium`, `high`
-  - `opus` / `claude-opus-4-6`: `low`, `medium`, `high`, `max`
+  - `gpt-6-astra`, `gpt-6.1-sol`: `low`, `medium`, `high`, `xhigh`
+  - `gpt-6.1-terra`: `low`, `medium`, `high`
+  - `gpt-6-luna`: `low`, `medium`, `high`, `max`
+- Claude 5.5/Fable `reasoning_effort` guardrails are model-specific:
+  - `sonnet` / `claude-sonnet-5-5`: `low`, `medium`, `high`
+  - `opus` / `claude-opus-5-5`: `low`, `medium`, `high`, `max`
+  - `fable` / `claude-fable-5-2`: `low`, `medium`, `high`, `max`
   - `haiku`: disabled in this MCP
+- agy accepts `--model` and `--effort`; `default` and `auto` omit both overrides. Model IDs include their published effort variants, while `reasoning_effort` is translated to agy's `--effort` flag.
 - Note: some Gemini preview models may require additional internal flags/account enablement.
 
 ## Orchestrator Capability Tool

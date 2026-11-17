@@ -4,6 +4,8 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from model_bridge.adapters.subprocess_adapter import SubprocessAdapter
+from model_bridge.config.config_loader import _load_default_yaml
+from model_bridge.core.agy_capabilities import DOCUMENTED_AGY_EFFORTS_BY_MODEL
 from model_bridge.core.provider_registry import build_default_provider_registry
 from model_bridge.main import ask_agy_cli, _ask_with_failover, _dispatch_ask_provider
 
@@ -22,7 +24,7 @@ def _build_agy_config():
             "transport_mode": "subprocess",
         },
         "models": {
-            "agy_model_catalog": ["default"],
+            "agy_model_catalog": ["default", "gemini-4-hydrogen-high"],
         }
     }
 
@@ -204,11 +206,12 @@ def test_agy_registry_capabilities():
     assert registry.supports_capability("agy", "force_model") is True
 
 @pytest.mark.anyio
-async def test_ask_agy_cli_rejects_model_override():
+async def test_ask_agy_cli_accepts_model_override():
     with patch("model_bridge.main._get_config", return_value=_build_agy_config()):
-        # Model override check at ask_agy_cli boundary
-        response = await ask_agy_cli("hello", model="gpt-4")
-        assert "[PROVIDER ERROR] 'agy' does not support model overrides" in response
+        with patch("model_bridge.main._ask_with_failover", return_value="ok") as run_mock:
+            response = await ask_agy_cli("hello", model="gemini-4-hydrogen-high")
+        assert response == "ok"
+        assert run_mock.call_args.kwargs["model"] == "gemini-4-hydrogen-high"
 
 @pytest.mark.anyio
 async def test_ask_agy_cli_rejects_sdk_transport():
@@ -226,11 +229,11 @@ async def test_dispatch_ask_provider_enforces_bounds():
     with patch("model_bridge.main._get_config", return_value=_build_agy_config()):
         resp_model = await _dispatch_ask_provider(
             "agy", "hello", save_path=None, force_model=False,
-            model="claude-3", reasoning_effort=None,
+            model="gemini-4-hydrogen-high", reasoning_effort=None,
             options={"timeout_seconds": 120, "max_output_tokens": 0, "response_format": "text", "verbosity": "normal", "stream": False},
             output_mode="clean"
         )
-        assert "[PROVIDER ERROR] 'agy' does not support model overrides" in resp_model
+        assert "[PROVIDER ERROR]" not in resp_model
 
     sdk_config = _build_agy_config()
     sdk_config["runtime"]["transport_mode"] = "sdk"
@@ -574,17 +577,36 @@ def test_positional_prompt_providers_set():
 
 
 @pytest.mark.anyio
-async def test_ask_agy_cli_warns_on_model_param():
-    """ask_agy_cli with a model value should log a warning."""
+async def test_ask_agy_cli_forwards_model_and_effort():
     from unittest.mock import AsyncMock
     import model_bridge.main as main_module
 
     mock_fn = AsyncMock(return_value="ok")
     with patch("model_bridge.main._get_config", return_value=_build_agy_config()), \
-         patch.object(main_module, "_ask_with_failover", mock_fn), \
-         patch("logging.Logger.warning") as warn_mock:
-        await main_module.ask_agy_cli(prompt="test", model="gpt-4o")
+         patch.object(main_module, "_ask_with_failover", mock_fn):
+        await main_module.ask_agy_cli(
+            prompt="test",
+            model="gemini-4-hydrogen-high",
+            reasoning_effort="high",
+        )
 
-    # Should have warned about ignored model param
-    assert any("model" in str(c.args[0]).lower() and "ignored" in str(c.args[0]).lower()
-               for c in warn_mock.call_args_list)
+    assert mock_fn.call_args.kwargs["model"] == "gemini-4-hydrogen-high"
+    assert mock_fn.call_args.kwargs["reasoning_effort"] == "high"
+
+
+def test_default_agy_catalog_models_are_documented_in_effort_matrix():
+    # Guard against drift between the packaged agy catalog (YAML) and the effort
+    # matrix (Python). Every real model must have a matrix entry so explicit
+    # --model selection passes validation; virtual placeholders are exempt
+    # because _normalize_model_override maps them to None before validation.
+    default_catalog = _load_default_yaml()["models"]["agy_model_catalog"]
+    undocumented = [
+        model
+        for model in default_catalog
+        if model not in {"default", "auto"}
+        and model not in DOCUMENTED_AGY_EFFORTS_BY_MODEL
+    ]
+    assert not undocumented, (
+        "agy_model_catalog entries missing from DOCUMENTED_AGY_EFFORTS_BY_MODEL: "
+        f"{undocumented}"
+    )

@@ -188,7 +188,7 @@ def test_run_async_codex_adds_reasoning_effort_to_payload(monkeypatch):
     assert captured["payload"]["reasoning"] == {"effort": "high"}
 
 
-def test_run_async_codex_falls_back_to_gpt_5_4_when_catalog_is_empty(monkeypatch):
+def test_run_async_codex_falls_back_to_current_default_when_catalog_is_empty(monkeypatch):
     captured = {}
     adapter = SDKAdapter(
         models_config={
@@ -209,7 +209,7 @@ def test_run_async_codex_falls_back_to_gpt_5_4_when_catalog_is_empty(monkeypatch
 
     assert ok is True
     assert output == "ok"
-    assert captured["payload"]["model"] == "gpt-5.4"
+    assert captured["payload"]["model"] == "gpt-6.1-sol"
 
 
 def test_run_async_codex_extracts_nested_output_blocks(monkeypatch):
