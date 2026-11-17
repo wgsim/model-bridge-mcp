@@ -52,7 +52,13 @@ class TestDeepMerge:
         assert result == {"level1": {"level2": {"level3": {"val": "new"}, "extra": 1}}}
 
 
-def test_load_config_from_default_succeeds():
+def test_load_config_from_default_succeeds(monkeypatch, tmp_path):
+    # Isolate from the developer's ~/.model_bridge/local.yaml overlay so this
+    # asserts the packaged defaults, not machine-local state.
+    monkeypatch.setattr(
+        "model_bridge.config.config_loader._LOCAL_CONFIG_PATH",
+        tmp_path / "no-local-overlay.yaml",
+    )
     config = load_config()
     assert "commands" in config
     assert "routing" in config
