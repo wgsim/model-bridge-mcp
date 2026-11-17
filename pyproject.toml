@@ -10,7 +10,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
-  "mcp",
+  # Pin to v1: mcp 2.x renames FastMCP to MCPServer and breaks imports; migrate before unpinning.
+  "mcp>=1.0,<2",
   "pydantic>=2.0",
   "PyYAML",
   "jsonschema>=4.0",
